@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/zcyc/idinfo/internal/output"
-
 	"github.com/zcyc/idinfo/internal/parsers"
 )
 
