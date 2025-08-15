@@ -1,0 +1,42 @@
+# Clacky-related configuration
+/.clackyai/
+
+# Go-specific files
+# Binary output
+idinfo
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Go modules
+vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Build and temp files
+*.tmp
+*.log
+
+# IDE and editor files
+.vscode/
+.idea/
+*~
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.local
+.env.*.local
