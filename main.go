@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/zcyc/idinfo/internal/output"
 	"github.com/zcyc/idinfo/internal/parsers"
 )
@@ -122,6 +123,22 @@ func main() {
 }
 
 func handleGeneration(format string) {
+	// Check if this is a UUID with version specification (e.g., "uuid:v1")
+	if strings.HasPrefix(strings.ToLower(format), "uuid:") {
+		parts := strings.SplitN(format, ":", 2)
+		if len(parts) == 2 {
+			version := strings.ToLower(parts[1])
+			id, err := generateUUIDWithVersion(version)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error generating UUID %s: %v\n", version, err)
+				os.Exit(1)
+			}
+			fmt.Println(id)
+			return
+		}
+	}
+
+	// Use existing parser for other formats or plain "uuid"
 	registry := parsers.NewRegistry()
 	parser := registry.GetParser(format)
 	if parser == nil {
@@ -134,7 +151,7 @@ func handleGeneration(format string) {
 			}
 			fmt.Fprintf(os.Stderr, "%s", name)
 		}
-		fmt.Fprintf(os.Stderr, "\n")
+		fmt.Fprintf(os.Stderr, "\nFor UUID, you can also specify version: uuid:v1, uuid:v3, uuid:v4, uuid:v5, uuid:v6, uuid:v7\n")
 		os.Exit(1)
 	}
 
@@ -145,6 +162,54 @@ func handleGeneration(format string) {
 	}
 
 	fmt.Println(id)
+}
+
+func generateUUIDWithVersion(version string) (string, error) {
+	switch version {
+	case "v1":
+		// UUID v1: timestamp and MAC address
+		u, err := uuid.NewUUID()
+		if err != nil {
+			return "", fmt.Errorf("failed to generate UUID v1: %w", err)
+		}
+		return u.String(), nil
+
+	case "v3":
+		// UUID v3: namespace name based with MD5
+		// Use a default namespace (DNS) and a default name for command-line usage
+		u := uuid.NewMD5(uuid.NameSpaceDNS, []byte("idinfo-generated"))
+		return u.String(), nil
+
+	case "v4":
+		// UUID v4: random (default)
+		u := uuid.New()
+		return u.String(), nil
+
+	case "v5":
+		// UUID v5: namespace name based with SHA-1
+		// Use a default namespace (DNS) and a default name for command-line usage
+		u := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("idinfo-generated"))
+		return u.String(), nil
+
+	case "v6":
+		// UUID v6: reordered timestamp and MAC address
+		u, err := uuid.NewV6()
+		if err != nil {
+			return "", fmt.Errorf("failed to generate UUID v6: %w", err)
+		}
+		return u.String(), nil
+
+	case "v7":
+		// UUID v7: sortable timestamp and random
+		u, err := uuid.NewV7()
+		if err != nil {
+			return "", fmt.Errorf("failed to generate UUID v7: %w", err)
+		}
+		return u.String(), nil
+
+	default:
+		return "", fmt.Errorf("unsupported UUID version '%s'. Supported versions: v1, v3, v4, v5, v6, v7", version)
+	}
 }
 
 func showHelp() {
@@ -164,6 +229,8 @@ OPTIONS:
     -o <OUTPUT>     Output format (card, short, json, binary) [default: card]
     -e              Show all possible format interpretations
     -g <FORMAT>     Generate new ID of specified format
+                    For UUID, you can specify version: uuid:v1, uuid:v3, uuid:v4, 
+                    uuid:v5, uuid:v6, uuid:v7 (default is v4)
     --color         Enable colored output [default: true]
     --compare       Compare timestamps from different format interpretations
     --help          Show this help message
@@ -176,7 +243,13 @@ EXAMPLES:
       echo "01941f29-7c00-7aaa-aaaa-aaaaaaaaaaaa" | idinfo -
 
     Generate ID:
-      idinfo -g uuid
+      idinfo -g uuid         # Generate UUID v4 (random)
+      idinfo -g uuid:v1      # Generate UUID v1 (timestamp + MAC)
+      idinfo -g uuid:v3      # Generate UUID v3 (namespace + name MD5)
+      idinfo -g uuid:v4      # Generate UUID v4 (random)
+      idinfo -g uuid:v5      # Generate UUID v5 (namespace + name SHA-1)
+      idinfo -g uuid:v6      # Generate UUID v6 (reordered timestamp + MAC)
+      idinfo -g uuid:v7      # Generate UUID v7 (sortable timestamp + random)
       idinfo -g ulid
       idinfo -g objectid
 
