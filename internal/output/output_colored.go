@@ -48,6 +48,13 @@ func ShowCardColored(info *types.IDInfo) {
 	borderColor.Print("│ ")
 	valueColor.Printf("%-43s ", info.Standard)
 	borderColor.Println("┃")
+	if info.UUIDWrap != nil {
+		borderColor.Print("┃ ")
+		labelColor.Printf("%-9s ", "UUID wrap")
+		borderColor.Print("│ ")
+		valueColor.Printf("%-43s ", *info.UUIDWrap)
+		borderColor.Println("┃")
+	}
 
 	// Integer representation
 	if info.Integer != nil {
@@ -84,7 +91,7 @@ func ShowCardColored(info *types.IDInfo) {
 	borderColor.Print("┃ ")
 	labelColor.Printf("%-9s ", "Size")
 	borderColor.Print("│ ")
-	valueColor.Printf("%-43s ", fmt.Sprintf("%d bits", info.Size))
+	valueColor.Printf("%-43s ", sizeDescription(info))
 	borderColor.Println("┃")
 
 	if info.Entropy != nil {
@@ -108,6 +115,13 @@ func ShowCardColored(info *types.IDInfo) {
 		labelColor.Printf("%-9s ", "Timestamp")
 		borderColor.Print("│ ")
 		valueColor.Printf("%-43s ", timeStr)
+		borderColor.Println("┃")
+	}
+	if info.Relative != nil {
+		borderColor.Print("┃ ")
+		labelColor.Printf("%-9s ", "Relative")
+		borderColor.Print("│ ")
+		valueColor.Printf("%-43s ", *info.Relative)
 		borderColor.Println("┃")
 	}
 
@@ -137,6 +151,13 @@ func ShowCardColored(info *types.IDInfo) {
 		labelColor.Printf("%-9s ", "Node 2")
 		borderColor.Print("│ ")
 		color.New(color.FgHiBlack).Printf("%-43s ", "-")
+		borderColor.Println("┃")
+	}
+	if info.Node3 != nil {
+		borderColor.Print("┃ ")
+		labelColor.Printf("%-9s ", "Node 3")
+		borderColor.Print("│ ")
+		valueColor.Printf("%-43s ", *info.Node3)
 		borderColor.Println("┃")
 	}
 

@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/zcyc/idinfo/internal/output"
 	"github.com/zcyc/idinfo/internal/parsers"
+	"github.com/zcyc/idinfo/internal/types"
 )
 
 func main() {
@@ -19,14 +21,24 @@ func main() {
 		outputFormat = flag.String("o", "card", "Output format (card, short, json, binary)")
 		everything   = flag.Bool("e", false, "Show all possible format interpretations")
 		compare      = flag.Bool("compare", false, "Compare timestamps from different formats")
+		compareShort = flag.Bool("c", false, "Compare timestamps from different formats")
 		generate     = flag.String("g", "", "Generate ID of specified format")
 		colorOutput  = flag.Bool("color", true, "Enable colored output")
+		alphabet     = flag.String("a", "", "Custom alphabet for Sqids and Nano ID")
+		relative     = flag.Bool("r", false, "Show relative time if available")
+		salt         = flag.String("salt", "", "Custom salt for Hashids")
+		epoch        = flag.Int64("epoch", 0, "Override epoch (seconds since 1970-01-01 UTC)")
+		version      = flag.Bool("version", false, "Show version")
 		help         = flag.Bool("help", false, "Show help")
 	)
 	flag.Parse()
 
 	if *help {
 		showHelp()
+		return
+	}
+	if *version {
+		fmt.Println("idinfo 0.1.0")
 		return
 	}
 
@@ -66,8 +78,23 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Parse the ID
-	results := parsers.ParseID(input, *forceFormat)
+	options := types.ParseOptions{Alphabet: *alphabet, Salt: *salt}
+	flag.Visit(func(value *flag.Flag) {
+		if value.Name == "epoch" {
+			options.Epoch, options.HasEpoch = *epoch, true
+		}
+	})
+	compareMode := *compare || *compareShort
+	var results []*types.IDInfo
+	if *everything || compareMode {
+		if *everything {
+			results = parsers.ParseAllWithOptions(input, options)
+		} else {
+			results = parsers.ParseTimesWithOptions(input, options)
+		}
+	} else {
+		results = parsers.ParseIDWithOptions(input, *forceFormat, options)
+	}
 
 	if len(results) == 0 {
 		fmt.Fprintf(os.Stderr, "Error: Unable to parse ID '%s'\n", input)
@@ -76,10 +103,24 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Try without the -f flag for auto-detection.\n")
 		} else {
 			fmt.Fprintf(os.Stderr, "The ID format is not recognized or supported.\n")
-			fmt.Fprintf(os.Stderr, "Supported formats: UUID, ULID, ObjectId, KSUID, Xid, CUID, SCRU128, TSID, NUID, NanoID, Snowflake, UnixTime, HashHex, Base58, PushID, Base32, ShortUUID, Sqids, TypeID\n")
+			fmt.Fprintf(os.Stderr, "Supported formats: %s\n", strings.Join(parsers.NewRegistry().GetAvailableParsers(), ", "))
 			fmt.Fprintf(os.Stderr, "Try using -f to force a specific format.\n")
 		}
 		os.Exit(1)
+	}
+
+	if *relative {
+		for _, info := range results {
+			if info.DateTime == nil {
+				continue
+			}
+			diff := time.Since(*info.DateTime)
+			value := "in " + relativeDuration(-diff)
+			if diff >= 0 {
+				value = relativeDuration(diff) + " ago"
+			}
+			info.Relative = &value
+		}
 	}
 
 	// Handle different output modes
@@ -88,7 +129,7 @@ func main() {
 		return
 	}
 
-	if *compare {
+	if compareMode {
 		output.ShowComparison(results)
 		return
 	}
@@ -222,17 +263,26 @@ USAGE:
 
 OPTIONS:
     -f <FORMAT>     Force parsing as specific format
-                    Available formats: uuid, ulid, objectid, ksuid, xid, cuid,
-                    scru128, tsid, nuid, nanoid, snowflake, base58, pushid,
-                    base32, shortuuid,
-                    sqids, typeid, etc.
+                    Available formats: uuid, uuid-b64, uuid25, shortuuid, uuid-int,
+                    ulid, julid, upid, sandflake, timeflake, flake, objectid,
+                    ksuid, xid, scru128, scru64, tsid, nuid, typeid, pushid,
+                    orderlyid, threads, snowid, nano64, sqid, hashid, youtube,
+                    stripe, datadog, breezeid, puid, tid, duns, asin, gdocs,
+                    slack, spotify, swhid, iban, commerce, vin, bitcoin,
+                    ethereum, ipfs, ipv4, ipv6, mac, imei, isbn, h3, mist, comb,
+                    snowflake variants, unix units, hashes, base58, base32.
     -o <OUTPUT>     Output format (card, short, json, binary) [default: card]
     -e              Show all possible format interpretations
     -g <FORMAT>     Generate new ID of specified format
                     For UUID, you can specify version: uuid:v1, uuid:v3, uuid:v4, 
                     uuid:v5, uuid:v6, uuid:v7 (default is v4)
     --color         Enable colored output [default: true]
-    --compare       Compare timestamps from different format interpretations
+    -c, --compare   Compare timestamps from different format interpretations
+    -a <ALPHABET>   Custom alphabet for Sqids and Nano ID
+    -r              Show relative time if timestamp is available
+    --salt <SALT>   Custom salt for Hashids
+    --epoch <SEC>   Override epoch (seconds since 1970-01-01 UTC)
+    --version       Show version
     --help          Show this help message
 
 EXAMPLES:
@@ -254,13 +304,27 @@ EXAMPLES:
       idinfo -g objectid
 
 SUPPORTED ID FORMATS:
-    - UUID (v1-v8), ULID, MongoDB ObjectId
-    - KSUID, Xid, CUID2, SCRU128, TSID, NUID
-    - Snowflake variants (Twitter, Discord, etc.)
-    - NanoID, Firebase PushID
-    - Base58 (Bitcoin-style), Base32, Unix timestamps
-    - Hex-encoded hashes (MD5, SHA-1, SHA-256, etc.)
-    - ShortUUID
-    - Sqids, TypeID (typed identifiers)
+    - UUID (v1-v8), ShortUUID, UUID Base64, UUID25, UUID integer
+    - ULID, Julid, UPID, Sandflake, Timeflake, Flake, SCRU128/SCRU64
+    - MongoDB ObjectId, KSUID, Xid, TSID, NUID, TypeID, CUID, NanoID
+    - Snowflake variants, SnowID, Threads, TID, Firebase PushID, Nano64
+    - Sqid/Hashid, YouTube, Stripe, Datadog, BreezeID, PUID, OrderlyID
+    - DUNS, ASIN, Google Docs, Slack, Spotify, SWHID, IBAN, barcodes, VIN
+    - Bitcoin, Ethereum, IPFS, IPv4/IPv6, MAC, IMEI, ISBN, H3, hashes, COMB
 `)
+}
+
+func relativeDuration(duration time.Duration) string {
+	switch {
+	case duration < time.Minute:
+		return "less than a minute"
+	case duration < time.Hour:
+		return fmt.Sprintf("%d minutes", int(duration/time.Minute))
+	case duration < 24*time.Hour:
+		return fmt.Sprintf("%d hours", int(duration/time.Hour))
+	case duration < 365*24*time.Hour:
+		return fmt.Sprintf("%d days", int(duration/(24*time.Hour)))
+	default:
+		return fmt.Sprintf("%d years", int(duration/(365*24*time.Hour)))
+	}
 }

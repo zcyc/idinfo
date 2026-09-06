@@ -17,15 +17,16 @@ require (
 	github.com/rushysloth/go-tsid v1.0.6
 	github.com/scru128/go-scru128 v1.0.0
 	github.com/segmentio/ksuid v1.0.4
+	github.com/speps/go-hashids/v2 v2.0.1
 	github.com/sqids/sqids-go v0.4.1
 	go.jetify.com/typeid/v2 v2.0.0-alpha.3
 	go.mongodb.org/mongo-driver v1.17.4
+	golang.org/x/crypto v0.39.0
 )
 
 require (
 	github.com/gofrs/uuid/v5 v5.3.2 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	golang.org/x/crypto v0.39.0 // indirect
 	golang.org/x/sys v0.33.0 // indirect
 )

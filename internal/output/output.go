@@ -27,6 +27,9 @@ func ShowCard(info *types.IDInfo) {
 
 	// Standard representation
 	fmt.Printf("┃ %-9s │ %-43s ┃\n", "String", info.Standard)
+	if info.UUIDWrap != nil {
+		fmt.Printf("┃ %-9s │ %-43s ┃\n", "UUID wrap", *info.UUIDWrap)
+	}
 
 	// Integer representation
 	if info.Integer != nil {
@@ -48,7 +51,7 @@ func ShowCard(info *types.IDInfo) {
 	fmt.Println("┠───────────┼─────────────────────────────────────────────┨")
 
 	// Size and entropy
-	fmt.Printf("┃ %-9s │ %-43s ┃\n", "Size", fmt.Sprintf("%d bits", info.Size))
+	fmt.Printf("┃ %-9s │ %-43s ┃\n", "Size", sizeDescription(info))
 	if info.Entropy != nil {
 		fmt.Printf("┃ %-9s │ %-43s ┃\n", "Entropy", fmt.Sprintf("%d bits", *info.Entropy))
 	}
@@ -60,6 +63,9 @@ func ShowCard(info *types.IDInfo) {
 			timeStr = fmt.Sprintf("%s (%s)", *info.Timestamp, timeStr)
 		}
 		fmt.Printf("┃ %-9s │ %-43s ┃\n", "Timestamp", timeStr)
+	}
+	if info.Relative != nil {
+		fmt.Printf("┃ %-9s │ %-43s ┃\n", "Relative", *info.Relative)
 	}
 
 	// Node information
@@ -73,6 +79,9 @@ func ShowCard(info *types.IDInfo) {
 		fmt.Printf("┃ %-9s │ %-43s ┃\n", "Node 2", *info.Node2)
 	} else {
 		fmt.Printf("┃ %-9s │ %-43s ┃\n", "Node 2", "-")
+	}
+	if info.Node3 != nil {
+		fmt.Printf("┃ %-9s │ %-43s ┃\n", "Node 3", *info.Node3)
 	}
 
 	// Sequence
@@ -134,6 +143,16 @@ func ShowCard(info *types.IDInfo) {
 	fmt.Println("┗━━━━━━━━━━━┷━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
 }
 
+func sizeDescription(info *types.IDInfo) string {
+	if info.Size == 0 {
+		return "-"
+	}
+	if info.Parsed != "" {
+		return fmt.Sprintf("%d bits (%s)", info.Size, info.Parsed)
+	}
+	return fmt.Sprintf("%d bits", info.Size)
+}
+
 // ShowShort displays a short one-line summary
 func ShowShort(info *types.IDInfo) {
 	if info.Version != "" {
@@ -166,21 +185,29 @@ func ShowComparison(results []*types.IDInfo) {
 	type timestampInfo struct {
 		format    string
 		timestamp time.Time
-		future    bool
 	}
 
 	var timestamps []timestampInfo
-	now := time.Now()
 
 	for _, info := range results {
 		if info.DateTime != nil {
+			format := info.IDType
+			if info.Version != "" {
+				format += ": " + info.Version
+			}
 			timestamps = append(timestamps, timestampInfo{
-				format:    info.IDType,
+				format:    format,
 				timestamp: *info.DateTime,
-				future:    info.DateTime.After(now),
 			})
 		}
 	}
+	if len(timestamps) == 0 {
+		fmt.Println("This ID is not valid in any time-aware format.")
+		return
+	}
+
+	now := time.Now().UTC()
+	timestamps = append(timestamps, timestampInfo{format: "--- Now ---", timestamp: now})
 
 	// Sort by timestamp
 	sort.Slice(timestamps, func(i, j int) bool {
@@ -190,23 +217,6 @@ func ShowComparison(results []*types.IDInfo) {
 	fmt.Println("Date/times of the valid IDs parsed as:")
 
 	for _, ts := range timestamps {
-		prefix := "- "
-		suffix := ""
-		if ts.future {
-			suffix = " (future)"
-		}
-
-		// Check if this is around now
-		diff := now.Sub(ts.timestamp)
-		if diff < time.Minute && diff > -time.Minute {
-			prefix = "- "
-			suffix = " --- Now ---"
-		}
-
-		fmt.Printf("%s%s %s%s\n",
-			prefix,
-			ts.timestamp.Format(time.RFC3339),
-			ts.format,
-			suffix)
+		fmt.Printf("- %s %s\n", ts.timestamp.UTC().Format("2006-01-02T15:04:05.000Z07:00"), ts.format)
 	}
 }
