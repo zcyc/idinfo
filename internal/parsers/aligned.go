@@ -6,7 +6,6 @@ package parsers
 
 import (
 	"crypto/sha256"
-	"encoding/base32"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -18,16 +17,18 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/google/uuid"
+	"github.com/ipfs/go-cid"
 	"github.com/lithammer/shortuuid/v4"
+	mh "github.com/multiformats/go-multihash"
 	"github.com/nrednav/cuid2"
 	"github.com/oklog/ulid/v2"
 	"github.com/rs/xid"
 	"github.com/rushysloth/go-tsid"
 	"github.com/speps/go-hashids/v2"
 	"github.com/sqids/sqids-go"
+	"github.com/uber/h3-go/v4"
 	"github.com/zcyc/idinfo/internal/types"
 	"go.jetify.com/typeid/v2"
 	"golang.org/x/crypto/sha3"
@@ -160,7 +161,11 @@ func parseBigDecimal(value string, bits int) (*big.Int, error) {
 
 func epochMillis(options types.ParseOptions, defaultMillis int64) int64 {
 	if options.HasEpoch {
-		return options.Epoch * 1000
+		const maxInt64 = uint64(^uint64(0) >> 1)
+		if options.Epoch > maxInt64/1000 {
+			return int64(maxInt64)
+		}
+		return int64(options.Epoch * 1000)
 	}
 	return defaultMillis
 }
@@ -240,10 +245,12 @@ func parseUUIDAligned(input string, options types.ParseOptions) (*types.IDInfo, 
 	case variant == uuid.Microsoft:
 		info.IDType = "Microsoft GUID"
 	case variant == uuid.RFC4122:
-		if version >= 6 {
+		if version >= 6 && version <= 8 {
 			info.IDType = "UUID (RFC-9562)"
-		} else {
+		} else if version >= 1 && version <= 5 {
 			info.IDType = "UUID (RFC-4122)"
+		} else {
+			info.IDType = "UUID"
 		}
 		labels := map[uuid.Version]string{
 			1: "1 (timestamp and node)", 2: "2 (DCE security)", 3: "3 (MD5 hash)",
@@ -314,7 +321,19 @@ func parseUUIDInteger(input string, options types.ParseOptions) (*types.IDInfo, 
 	if err != nil {
 		return nil, err
 	}
-	return withUUIDWrapper(value.String(), options, "Integer", "as integer", bigEndianBytes(value, 16))
+	data := bigEndianBytes(value, 16)
+	uuidValue, err := uuidFromBytes(data)
+	if err != nil {
+		return nil, err
+	}
+	info, err := parseUUIDAligned(uuidValue.String(), options)
+	if err != nil {
+		return nil, err
+	}
+	info.IDType = "Integer of " + info.IDType
+	info.Standard = uuidValue.String()
+	info.Parsed = "as integer"
+	return info, nil
 }
 
 func parseUUIDBase64(input string, options types.ParseOptions) (*types.IDInfo, error) {
@@ -466,8 +485,11 @@ func parseSandflake(input string, options types.ParseOptions) (*types.IDInfo, er
 	info := infoFromBytes(idType, "", input, parsed, data, 128, 24)
 	setIntegerValue(info, new(big.Int).SetBytes(data), 16)
 	info.Standard = encodeBase(new(big.Int).SetBytes(data), "0123456789ABCDEFGHJKMNPQRSTVWXYZ", 26)
+	wrapped, _ := uuidFromBytes(data)
 	if idType == "Sandflake wrapped in UUID" {
 		info.UUIDWrap = stringPtr(input)
+	} else {
+		info.UUIDWrap = stringPtr(wrapped.String())
 	}
 	timestamp := int64(binary.BigEndian.Uint64(append([]byte{0, 0}, data[:6]...)))
 	info.Timestamp, info.DateTime = timestampInfo(timestamp, epochMillis(options, 0))
@@ -536,7 +558,7 @@ func parseFlake(input string, options types.ParseOptions) (*types.IDInfo, error)
 	}
 	info := infoFromBytes(idType, "", input, parsed, data, 128, 16)
 	setIntegerValue(info, new(big.Int).SetBytes(data), 16)
-	info.Standard = encodeBase(new(big.Int).SetBytes(data), base62Alphabet, 22)
+	info.Standard = encodeBase(new(big.Int).SetBytes(data), base62Alphabet, 0)
 	wrapped, _ := uuidFromBytes(data)
 	info.UUIDWrap = stringPtr(wrapped.String())
 	info.Timestamp, info.DateTime = timestampInfo(int64(binary.BigEndian.Uint64(data[:8])), epochMillis(options, 0))
@@ -548,7 +570,7 @@ func parseFlake(input string, options types.ParseOptions) (*types.IDInfo, error)
 
 func parseSCRU128Aligned(input string, options types.ParseOptions) (*types.IDInfo, error) {
 	value, err := decodeBase(input, "0123456789abcdefghijklmnopqrstuvwxyz")
-	fromBase36 := err == nil && value.BitLen() <= 128
+	fromBase36 := err == nil && len(input) == 25 && value.BitLen() <= 128
 	if !fromBase36 {
 		wrapped, uuidErr := uuid.Parse(input)
 		if uuidErr != nil {
@@ -603,10 +625,9 @@ func parseTSIDAligned(input string, options types.ParseOptions) (*types.IDInfo, 
 		}
 		value = parsed
 	}
-	standard := strconv.FormatUint(value, 10)
+	standard := tsid.FromNumber(int64(value)).ToString()
 	parsed := "as integer"
 	if fromBase32 {
-		standard = strings.ToUpper(input)
 		parsed = "from Crockford's base32"
 	}
 	info := infoFromBytes("TSID", "", standard, parsed, bigEndianBytes(new(big.Int).SetUint64(value), 8), 64, 22)
@@ -733,6 +754,10 @@ func parseSnowflakeAligned(input string, options types.ParseOptions, layoutName 
 	info := infoFromBytes("Snowflake", layout.name, standard, "as integer", bigEndianBytes(new(big.Int).SetUint64(value), 8), 64, 0)
 	setIntegerValue(info, new(big.Int).SetUint64(value), 8)
 	info.Standard = standard
+	info.HighConfidence = false
+	if layoutName == "sf-simpleflake" {
+		info.Entropy = intPtr(23)
+	}
 	rawTimestamp := bitsU64(value, layout.timeOffset, layout.timeBits)
 	if layout.name == "Sony" {
 		rawTimestamp *= 10
@@ -741,11 +766,15 @@ func parseSnowflakeAligned(input string, options types.ParseOptions, layoutName 
 	}
 	info.Timestamp, info.DateTime = timestampInfo(int64(rawTimestamp), epochMillis(options, layout.defaultMS))
 	if layout.nodeBits > 0 {
-		label := "Worker ID"
-		if layoutName == "sf-flakeid" {
-			label = "Datacenter ID"
+		label := map[string]string{
+			"sf-twitter": "Worker ID", "sf-discord": "Worker ID", "sf-instagram": "Shard ID", "sf-sony": "Machine ID",
+			"sf-spaceflake": "Node ID", "sf-linkedin": "Worker ID", "sf-flakeid": "Datacenter ID",
+		}[layoutName]
+		node := fmt.Sprintf("%d", bitsU64(value, layout.nodeOffset, layout.nodeBits))
+		if layoutName != "sf-frostflake" {
+			node += " (" + label + ")"
 		}
-		info.Node1 = stringPtr(fmt.Sprintf("%d (%s)", bitsU64(value, layout.nodeOffset, layout.nodeBits), label))
+		info.Node1 = stringPtr(node)
 	}
 	if layoutName == "sf-flakeid" {
 		info.Node2 = stringPtr(fmt.Sprintf("%d (Worker ID)", bitsU64(value, 47, 5)))
@@ -767,6 +796,7 @@ func parseSnowflakeAuto(input string, options types.ParseOptions) (*types.IDInfo
 	info := infoFromBytes("Snowflake", "Unknown (use -f to specify version)", input, "as integer", bigEndianBytes(new(big.Int).SetUint64(value), 8), 64, 0)
 	setIntegerValue(info, new(big.Int).SetUint64(value), 8)
 	info.Standard = input
+	info.HighConfidence = false
 	return info, nil
 }
 
@@ -859,7 +889,6 @@ func parseCUID1(input string, options types.ParseOptions) (*types.IDInfo, error)
 		return nil, err
 	}
 	info := asciiInfo("CUID", "1", input, "as ASCII, with base36 parts", input, 64)
-	setIntegerValue(info, new(big.Int).SetBytes([]byte(input)), 0)
 	info.Timestamp, info.DateTime = timestampInfo(timestamp.Int64(), epochMillis(options, 0))
 	info.Sequence = int64Ptr(sequence.Int64())
 	info.Node1 = stringPtr(fmt.Sprintf("%d (Fingerprint)", fingerprint))
@@ -1039,6 +1068,17 @@ func parseShortPUID(input string, options types.ParseOptions) (*types.IDInfo, er
 	return info, nil
 }
 
+func parsePUIDAny(input string, options types.ParseOptions) (*types.IDInfo, error) {
+	switch len(input) {
+	case 24:
+		return parsePUID(input, options)
+	case 12, 14:
+		return parseShortPUID(input, options)
+	default:
+		return nil, errors.New("invalid PUID length")
+	}
+}
+
 func parseBreezeID(input string, options types.ParseOptions) (*types.IDInfo, error) {
 	if len(input) < 4 || len(input) > 128 || strings.HasSuffix(input, "-") {
 		return nil, errors.New("invalid Breeze ID")
@@ -1094,7 +1134,7 @@ func parseSlack(input string, options types.ParseOptions) (*types.IDInfo, error)
 	if err != nil {
 		return nil, err
 	}
-	info := asciiInfo("Slack ID", kind+" ID", input, "as ASCII, with base36 parts", input, (len(input)-offset)*8)
+	info := asciiInfo("Slack ID", kind+" ID", input, "as ASCII, with base62 parts", input, (len(input)-offset)*8)
 	setIntegerValue(info, value, 0)
 	info.Node1 = stringPtr(fmt.Sprintf("%s (%s)", input[:offset], kind))
 	return info, nil
@@ -1153,7 +1193,14 @@ func parseSqidAligned(input string, options types.ParseOptions) (*types.IDInfo, 
 	}
 	info := asciiInfo("Sqid", version, input, "as ASCII", input, 0)
 	info.Node1 = stringPtr(joinUint64(numbers))
-	info.HighConfidence = options.Alphabet == "" && len(numbers) > 1
+	allTrailingZero := len(numbers) > 1
+	for _, number := range numbers[1:] {
+		if number != 0 {
+			allTrailingZero = false
+			break
+		}
+	}
+	info.HighConfidence = options.Alphabet == "" && len(numbers) > 1 && !allTrailingZero
 	return info, nil
 }
 
@@ -1202,7 +1249,7 @@ func parseDUNS(input string, options types.ParseOptions) (*types.IDInfo, error) 
 		return nil, errors.New("invalid DUNS number")
 	}
 	value, _ := strconv.ParseUint(strings.ReplaceAll(input, "-", ""), 10, 32)
-	info := asciiInfo("DUNS Number", "", input, "as integer", input, 32)
+	info := infoFromBytes("DUNS Number", "", input, "as integer", bigEndianBytes(new(big.Int).SetUint64(value), 4), 32, 32)
 	setIntegerValue(info, new(big.Int).SetUint64(value), 4)
 	return info, nil
 }
@@ -1232,12 +1279,12 @@ func parseSWHID(input string, options types.ParseOptions) (*types.IDInfo, error)
 	if err != nil {
 		return nil, err
 	}
-	return infoFromBytes("SWHID (Software Hash ID)", fmt.Sprintf("Schema: 1, object type: %s", object), input, "from hex", data, 160, 160), nil
+	return infoFromBytes("SWHID (Software Hash ID)", fmt.Sprintf("Schema: 1, object type: %s", object), strings.Join(parts, ":"), "from hex", data, 160, 160), nil
 }
 
 func parseISBN(input string, options types.ParseOptions) (*types.IDInfo, error) {
 	clean := strings.ReplaceAll(input, "-", "")
-	if len(clean) == 13 && isDigits(clean) && isbn13Valid(clean) {
+	if len(clean) == 13 && isDigits(clean) && (strings.HasPrefix(clean, "978") || strings.HasPrefix(clean, "979")) && isbn13Valid(clean) {
 		return isbnInfo(clean, "ISBN-13"), nil
 	}
 	if len(clean) == 10 && isbn10Valid(clean) {
@@ -1290,14 +1337,23 @@ func isbn10Valid(value string) bool {
 func isbnInfo(clean, kind string) *types.IDInfo {
 	standard := clean
 	if kind == "ISBN-13" {
-		standard = clean[:3] + "-" + clean[3:4] + "-" + clean[4:9] + "-" + clean[9:12] + "-" + clean[12:]
+		standard = clean[:3] + "-" + clean[3:4] + "-" + clean[4:7] + "-" + clean[7:12] + "-" + clean[12:]
 	} else {
 		standard = clean[:1] + "-" + clean[1:5] + "-" + clean[5:9] + "-" + clean[9:]
 	}
-	info := asciiInfo(kind, "", standard, "as ASCII, no dashes", standard, 0)
+	info := asciiInfo(kind, "", standard, "as ASCII, no dashes", clean, 0)
 	value, _ := parseBigDecimal(clean, 64)
 	if value != nil {
 		setIntegerValue(info, value, 0)
+	}
+	if kind == "ISBN-13" {
+		info.Node1 = stringPtr(clean[3:4])
+		info.Node2 = stringPtr(fmt.Sprintf("%s (Publisher ID)", clean[4:7]))
+		info.Sequence = int64Ptr(parseInt64(clean[7:12]))
+	} else {
+		info.Node1 = stringPtr(clean[:1])
+		info.Node2 = stringPtr(fmt.Sprintf("%s (Publisher ID)", clean[1:5]))
+		info.Sequence = int64Ptr(parseInt64(clean[5:9]))
 	}
 	return info
 }
@@ -1318,6 +1374,7 @@ func parseIPv4(input string, options types.ParseOptions) (*types.IDInfo, error) 
 	}
 	info := infoFromBytes("IPv4 Address", version, input, "from integer parts", data[:], 32, -1)
 	setIntegerValue(info, new(big.Int).SetUint64(uint64(value)), 4)
+	info.HighConfidence = true
 	return info, nil
 }
 
@@ -1329,6 +1386,7 @@ func parseIPv6(input string, options types.ParseOptions) (*types.IDInfo, error) 
 	data := addr.As16()
 	info := infoFromBytes("IPv6 Address", ternary(addr.IsLoopback(), "Loopback", ""), addr.String(), "from hex parts", data[:], 128, -1)
 	setIntegerValue(info, new(big.Int).SetBytes(data[:]), 16)
+	info.HighConfidence = true
 	return info, nil
 }
 
@@ -1350,6 +1408,7 @@ func parseMAC(input string, options types.ParseOptions) (*types.IDInfo, error) {
 	setIntegerValue(info, new(big.Int).SetBytes(data), 6)
 	info.Node1 = stringPtr(fmt.Sprintf("%s, hex: %s (Manufacturer)", prefix, strings.ToLower(input)[:8]))
 	info.Sequence = int64Ptr(sequence)
+	info.HighConfidence = true
 	return info, nil
 }
 
@@ -1398,7 +1457,7 @@ func luhnValid(value string) bool {
 }
 
 var ibanLengths = map[string]int{
-	"NO": 15, "BE": 16, "DK": 18, "FI": 18, "FO": 18, "GL": 18, "NL": 18, "SD": 18,
+	"NO": 15, "BE": 16, "DK": 18, "FI": 18, "FK": 18, "FO": 18, "GL": 18, "NL": 18, "SD": 18,
 	"MK": 19, "SI": 19, "AT": 20, "BA": 20, "EE": 20, "KZ": 20, "LT": 20, "LU": 20, "MN": 20, "XK": 20,
 	"CH": 21, "HR": 21, "LI": 21, "LV": 21, "BG": 22, "BH": 22, "CR": 22, "DE": 22, "GB": 22, "GE": 22,
 	"IE": 22, "ME": 22, "RS": 22, "VA": 22, "AE": 23, "GI": 23, "IL": 23, "IQ": 23, "OM": 23, "SO": 23,
@@ -1412,7 +1471,27 @@ var ibanLengths = map[string]int{
 	"LC": 32, "RU": 33,
 }
 
-var ibanCountries = map[string]string{"NO": "Norway", "GB": "United Kingdom", "DE": "Germany", "FR": "France", "NL": "Netherlands", "CH": "Switzerland", "IT": "Italy", "ES": "Spain", "SE": "Sweden", "RU": "Russia"}
+func ibanCountry(code string) string {
+	countries := map[string]string{
+		"AL": "Albania", "AD": "Andorra", "AE": "United Arab Emirates", "AO": "Angola", "AT": "Austria", "AZ": "Azerbaijan",
+		"BA": "Bosnia and Herzegovina", "BE": "Belgium", "BF": "Burkina Faso", "BG": "Bulgaria", "BH": "Bahrain", "BI": "Burundi", "BJ": "Benin",
+		"BR": "Brazil", "BY": "Belarus", "CF": "Central African Republic", "CG": "Congo", "CH": "Switzerland", "CI": "Ivory Coast", "CM": "Cameroon",
+		"CR": "Costa Rica", "CV": "Cape Verde", "CY": "Cyprus", "CZ": "Czech Republic", "DE": "Germany", "DJ": "Djibouti", "DK": "Denmark",
+		"DO": "Dominican Republic", "DZ": "Algeria", "EE": "Estonia", "EG": "Egypt", "ES": "Spain", "FI": "Finland", "FK": "Falkland Islands",
+		"FO": "Faroe Islands", "FR": "France", "GA": "Gabon", "GB": "United Kingdom", "GE": "Georgia", "GI": "Gibraltar", "GL": "Greenland",
+		"GQ": "Equatorial Guinea", "GR": "Greece", "GT": "Guatemala", "GW": "Guinea-Bissau", "HN": "Honduras", "HR": "Croatia", "HU": "Hungary",
+		"IE": "Ireland", "IL": "Israel", "IQ": "Iraq", "IR": "Iran", "IS": "Iceland", "IT": "Italy", "JO": "Jordan", "KM": "Comoros",
+		"KW": "Kuwait", "KZ": "Kazakhstan", "LB": "Lebanon", "LC": "Saint Lucia", "LI": "Liechtenstein", "LT": "Lithuania", "LU": "Luxembourg",
+		"LV": "Latvia", "LY": "Libya", "MA": "Morocco", "MC": "Monaco", "MD": "Moldova", "ME": "Montenegro", "MG": "Madagascar", "MK": "North Macedonia",
+		"ML": "Mali", "MN": "Mongolia", "MR": "Mauritania", "MT": "Malta", "MU": "Mauritius", "MZ": "Mozambique", "NE": "Niger", "NI": "Nicaragua",
+		"NL": "Netherlands", "NO": "Norway", "OM": "Oman", "PK": "Pakistan", "PL": "Poland", "PS": "Palestine", "PT": "Portugal", "QA": "Qatar",
+		"RO": "Romania", "RS": "Serbia", "RU": "Russia", "SA": "Saudi Arabia", "SC": "Seychelles", "SD": "Sudan", "SE": "Sweden", "SI": "Slovenia",
+		"SK": "Slovakia", "SM": "San Marino", "SN": "Senegal", "SO": "Somalia", "ST": "São Tomé and Príncipe", "SV": "El Salvador", "TD": "Chad",
+		"TG": "Togo", "TL": "Timor-Leste", "TN": "Tunisia", "TR": "Turkey", "UA": "Ukraine", "VA": "Vatican City", "VG": "British Virgin Islands",
+		"XK": "Kosovo", "YE": "Yemen",
+	}
+	return countries[code]
+}
 
 func parseIBAN(input string, options types.ParseOptions) (*types.IDInfo, error) {
 	clean := strings.ToUpper(strings.NewReplacer(" ", "", "-", "").Replace(input))
@@ -1429,11 +1508,11 @@ func parseIBAN(input string, options types.ParseOptions) (*types.IDInfo, error) 
 		}
 	}
 	valid := mod97(converted.String()) == 1
-	country := ibanCountries[clean[:2]]
+	country := ibanCountry(clean[:2])
 	if country == "" {
 		country = "Unknown"
 	}
-	info := asciiInfo("IBAN", fmt.Sprintf("%s (%s)", clean[:2], country), formatIBAN(clean), "as ASCII", formatIBAN(clean), 0)
+	info := asciiInfo("IBAN", fmt.Sprintf("%s (%s)", clean[:2], country), formatIBAN(clean), "as ASCII", clean, 0)
 	info.Node1 = stringPtr(fmt.Sprintf("%s (%s Checksum)", clean[2:4], ternary(valid, "Valid", "Invalid")))
 	info.Node2 = stringPtr(fmt.Sprintf("%s (BBAN)", clean[4:]))
 	info.HighConfidence = valid
@@ -1451,7 +1530,7 @@ func isUpperLetters(value string) bool {
 
 func isAlphaNumeric(value string) bool {
 	for _, char := range value {
-		if !unicode.IsLetter(char) && !unicode.IsDigit(char) {
+		if !((char >= 'A' && char <= 'Z') || (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9')) {
 			return false
 		}
 	}
@@ -1490,10 +1569,11 @@ func parseCommerce(input string, options types.ParseOptions) (*types.IDInfo, err
 	}
 	version := map[int]string{8: "EAN-8 (GTIN-8)", 12: "UPC-A (GTIN-12)", 13: "EAN-13 (GTIN-13)", 14: "GTIN-14"}[length]
 	if length == 14 {
-		version += ", " + map[byte]string{'0': "consumer unit", '9': "variable measure"}[clean[0]]
-		if strings.HasSuffix(version, ", ") {
-			version = "GTIN-14, grouping/packaging level"
+		packaging := map[byte]string{'0': "consumer unit", '9': "variable measure"}[clean[0]]
+		if packaging == "" {
+			packaging = "grouping/packaging level"
 		}
+		version += ", " + packaging
 	}
 	if length == 13 && (strings.HasPrefix(clean, "978") || strings.HasPrefix(clean, "979")) {
 		if isbn, err := parseISBN(clean, options); err == nil {
@@ -1514,7 +1594,263 @@ func parseCommerce(input string, options types.ParseOptions) (*types.IDInfo, err
 	info := asciiInfo("Commerce Barcode", version, standard, "as ASCII", clean, 0)
 	value, _ := parseBigDecimal(clean, 64)
 	setIntegerValue(info, value, 0)
+	switch length {
+	case 8:
+		info.Node1 = stringPtr(fmt.Sprintf("%s (%s)", clean[:3], gs1PrefixCountry(parseInt64(clean[:3]))))
+	case 12:
+		categories := map[byte]string{'0': "Regular UPC", '1': "Regular UPC", '2': "Variable weight", '3': "Drug/pharmaceutical", '4': "In-store use", '5': "Coupon", '6': "Regular UPC", '7': "Regular UPC", '8': "Regular UPC", '9': "Coupon"}
+		info.Node1 = stringPtr(fmt.Sprintf("%s (Number system: %s)", clean[:1], categories[clean[0]]))
+	case 13:
+		info.Node1 = stringPtr(fmt.Sprintf("%s (%s)", clean[:3], gs1PrefixCountry(parseInt64(clean[:3]))))
+	case 14:
+		info.Node1 = stringPtr(fmt.Sprintf("%s (%s)", clean[1:4], gs1PrefixCountry(parseInt64(clean[1:4]))))
+	}
 	return info, nil
+}
+
+func gs1PrefixCountry(prefix int64) string {
+	switch {
+	case prefix <= 19 || prefix >= 60 && prefix <= 99:
+		return "US & Canada"
+	case prefix >= 20 && prefix <= 29 || prefix >= 40 && prefix <= 49 || prefix >= 200 && prefix <= 299:
+		return "Variable weight (store)"
+	case prefix >= 30 && prefix <= 39:
+		return "US drugs"
+	case prefix >= 50 && prefix <= 59:
+		return "Coupons"
+	case prefix >= 100 && prefix <= 139:
+		return "US"
+	case prefix >= 300 && prefix <= 379:
+		return "France & Monaco"
+	case prefix == 380:
+		return "Bulgaria"
+	case prefix == 383:
+		return "Slovenia"
+	case prefix == 385:
+		return "Croatia"
+	case prefix == 387:
+		return "Bosnia and Herzegovina"
+	case prefix == 389:
+		return "Montenegro"
+	case prefix == 390:
+		return "Kosovo"
+	case prefix >= 400 && prefix <= 440:
+		return "Germany"
+	case prefix >= 450 && prefix <= 459 || prefix >= 490 && prefix <= 499:
+		return "Japan"
+	case prefix >= 460 && prefix <= 469:
+		return "Russia"
+	case prefix == 470:
+		return "Kyrgyzstan"
+	case prefix == 471:
+		return "Taiwan"
+	case prefix == 474:
+		return "Estonia"
+	case prefix == 475:
+		return "Latvia"
+	case prefix == 476:
+		return "Azerbaijan"
+	case prefix == 477:
+		return "Lithuania"
+	case prefix == 478:
+		return "Uzbekistan"
+	case prefix == 479:
+		return "Sri Lanka"
+	case prefix == 480:
+		return "Philippines"
+	case prefix == 481:
+		return "Belarus"
+	case prefix == 482:
+		return "Ukraine"
+	case prefix == 484:
+		return "Moldova"
+	case prefix == 485:
+		return "Armenia"
+	case prefix == 486:
+		return "Georgia"
+	case prefix == 487:
+		return "Kazakhstan"
+	case prefix == 488:
+		return "Tajikistan"
+	case prefix == 489:
+		return "Hong Kong"
+	case prefix >= 500 && prefix <= 509:
+		return "United Kingdom"
+	case prefix >= 520 && prefix <= 521:
+		return "Greece"
+	case prefix == 528:
+		return "Lebanon"
+	case prefix == 529:
+		return "Cyprus"
+	case prefix == 530:
+		return "Albania"
+	case prefix == 531:
+		return "North Macedonia"
+	case prefix == 535:
+		return "Malta"
+	case prefix == 539:
+		return "Ireland"
+	case prefix >= 540 && prefix <= 549:
+		return "Belgium & Luxembourg"
+	case prefix == 560:
+		return "Portugal"
+	case prefix == 569:
+		return "Iceland"
+	case prefix >= 570 && prefix <= 579:
+		return "Denmark, Faroe Islands, Greenland"
+	case prefix == 590:
+		return "Poland"
+	case prefix == 594:
+		return "Romania"
+	case prefix == 599:
+		return "Hungary"
+	case prefix >= 600 && prefix <= 601:
+		return "South Africa"
+	case prefix == 603:
+		return "Ghana"
+	case prefix == 604:
+		return "Senegal"
+	case prefix == 608:
+		return "Bahrain"
+	case prefix == 609:
+		return "Mauritius"
+	case prefix == 611:
+		return "Morocco"
+	case prefix == 613:
+		return "Algeria"
+	case prefix == 615:
+		return "Nigeria"
+	case prefix == 616:
+		return "Kenya"
+	case prefix == 618:
+		return "Ivory Coast"
+	case prefix == 619:
+		return "Tunisia"
+	case prefix == 620:
+		return "Tanzania"
+	case prefix == 621:
+		return "Syria"
+	case prefix == 622:
+		return "Egypt"
+	case prefix == 624:
+		return "Libya"
+	case prefix == 625:
+		return "Jordan"
+	case prefix == 626:
+		return "Iran"
+	case prefix == 627:
+		return "Kuwait"
+	case prefix == 628:
+		return "Saudi Arabia"
+	case prefix == 629:
+		return "United Arab Emirates"
+	case prefix >= 640 && prefix <= 649:
+		return "Finland"
+	case prefix >= 690 && prefix <= 699:
+		return "China"
+	case prefix >= 700 && prefix <= 709:
+		return "Norway"
+	case prefix == 729:
+		return "Israel"
+	case prefix >= 730 && prefix <= 739:
+		return "Sweden"
+	case prefix == 740:
+		return "Guatemala"
+	case prefix == 741:
+		return "El Salvador"
+	case prefix == 742:
+		return "Honduras"
+	case prefix == 743:
+		return "Nicaragua"
+	case prefix == 744:
+		return "Costa Rica"
+	case prefix == 745:
+		return "Panama"
+	case prefix == 746:
+		return "Dominican Republic"
+	case prefix == 750:
+		return "Mexico"
+	case prefix >= 754 && prefix <= 755:
+		return "Canada"
+	case prefix == 759:
+		return "Venezuela"
+	case prefix >= 760 && prefix <= 769:
+		return "Switzerland & Liechtenstein"
+	case prefix >= 770 && prefix <= 771:
+		return "Colombia"
+	case prefix == 773:
+		return "Uruguay"
+	case prefix == 775:
+		return "Peru"
+	case prefix == 777:
+		return "Bolivia"
+	case prefix >= 778 && prefix <= 779:
+		return "Argentina"
+	case prefix == 780:
+		return "Chile"
+	case prefix == 784:
+		return "Paraguay"
+	case prefix == 786:
+		return "Ecuador"
+	case prefix >= 789 && prefix <= 790:
+		return "Brazil"
+	case prefix >= 800 && prefix <= 839:
+		return "Italy, San Marino, Vatican"
+	case prefix >= 840 && prefix <= 849:
+		return "Spain & Andorra"
+	case prefix == 850:
+		return "Cuba"
+	case prefix == 858:
+		return "Slovakia"
+	case prefix == 859:
+		return "Czech Republic"
+	case prefix == 860:
+		return "Serbia"
+	case prefix == 865:
+		return "Mongolia"
+	case prefix == 867:
+		return "North Korea"
+	case prefix >= 868 && prefix <= 869:
+		return "Turkey"
+	case prefix >= 870 && prefix <= 879:
+		return "Netherlands"
+	case prefix == 880:
+		return "South Korea"
+	case prefix == 883:
+		return "Myanmar"
+	case prefix == 884:
+		return "Cambodia"
+	case prefix == 885:
+		return "Thailand"
+	case prefix == 888:
+		return "Singapore"
+	case prefix == 890:
+		return "India"
+	case prefix == 893:
+		return "Vietnam"
+	case prefix == 896:
+		return "Pakistan"
+	case prefix == 899:
+		return "Indonesia"
+	case prefix >= 900 && prefix <= 919:
+		return "Austria"
+	case prefix >= 930 && prefix <= 939:
+		return "Australia"
+	case prefix >= 940 && prefix <= 949:
+		return "New Zealand"
+	case prefix == 950:
+		return "GS1 Global Office"
+	case prefix == 955:
+		return "Malaysia"
+	case prefix == 958:
+		return "Macau"
+	case prefix == 977:
+		return "Serial publications - ISSN"
+	case prefix == 978 || prefix == 979:
+		return "Books and publications - ISBN"
+	default:
+		return "Unknown"
+	}
 }
 
 func gtinValid(value string) bool {
@@ -1532,7 +1868,146 @@ func gtinValid(value string) bool {
 	return byte((10-sum%10)%10)+'0' == value[len(value)-1]
 }
 
-var vinManufacturers = map[string]string{"1HG": "Honda", "1FA": "Ford", "1G1": "Chevrolet", "2HG": "Honda", "JHM": "Honda", "WBA": "BMW", "WB": "BMW", "WVW": "Volkswagen", "5YJ": "Tesla"}
+var vinManufacturers = map[string]string{
+	"1C3": "Chrysler", "1C4": "Chrysler", "1C6": "Chrysler", "1D3": "Dodge", "1D4": "Dodge", "1D7": "Dodge", "1D8": "Dodge",
+	"1FA": "Ford", "1FB": "Ford", "1FC": "Ford", "1FD": "Ford", "1FM": "Ford", "1FT": "Ford", "1G1": "Chevrolet", "1G2": "Pontiac",
+	"1G3": "Oldsmobile", "1G4": "Buick", "1G6": "Cadillac", "1GC": "GMC", "1GT": "GMC", "1GY": "Cadillac", "1HG": "Honda",
+	"1J4": "Jeep", "1J8": "Jeep", "1LN": "Lincoln", "1ME": "Mercury", "1N4": "Nissan", "1N6": "Nissan", "1VW": "Volkswagen",
+	"1YV": "Mazda", "1ZV": "Ford", "2C3": "Chrysler", "2D3": "Dodge", "2FA": "Ford", "2FB": "Ford", "2FM": "Ford", "2FT": "Ford",
+	"2G1": "Chevrolet", "2G2": "Pontiac", "2HG": "Honda", "2HJ": "Honda", "2HK": "Honda", "2T1": "Toyota", "2T2": "Toyota", "2T3": "Toyota",
+	"3C4": "Chrysler", "3C6": "Chrysler", "3D7": "Dodge", "3FA": "Ford", "3G1": "Chevrolet", "3GT": "GMC", "3HG": "Honda", "3N1": "Nissan", "3N6": "Nissan", "3VW": "Volkswagen",
+	"4F2": "Mazda", "4F4": "Mazda", "4T1": "Toyota", "4T3": "Toyota", "4T4": "Toyota", "5FN": "Honda", "5FR": "Honda", "5NP": "Hyundai", "5TD": "Toyota", "5TF": "Toyota", "5UX": "BMW", "5YJ": "Tesla",
+	"JA3": "Mitsubishi", "JA4": "Mitsubishi", "JF1": "Subaru", "JF2": "Subaru", "JHM": "Honda", "JN1": "Nissan", "JN6": "Nissan", "JN8": "Nissan", "JT2": "Toyota", "JTD": "Toyota", "JTE": "Toyota", "JTN": "Toyota", "JM1": "Mazda",
+	"WA1": "Audi", "WAU": "Audi", "WBA": "BMW", "WBS": "BMW", "WBY": "BMW", "WDB": "Mercedes-Benz", "WDC": "Mercedes-Benz", "WDD": "Mercedes-Benz", "WDF": "Mercedes-Benz", "WF0": "Ford (Germany)", "WP0": "Porsche", "WP1": "Porsche", "WVW": "Volkswagen", "WV1": "Volkswagen", "WV2": "Volkswagen",
+	"SAJ": "Jaguar", "SAL": "Land Rover", "SAR": "Rover", "SCC": "Lotus", "SCF": "Aston Martin", "KM8": "Hyundai", "KMH": "Hyundai", "KNA": "Kia", "KND": "Kia", "YS3": "Saab", "YV1": "Volvo", "YV4": "Volvo",
+	"ZAR": "Alfa Romeo", "ZAM": "Maserati", "ZCF": "Iveco", "ZFA": "Fiat", "ZFF": "Ferrari", "ZHW": "Lamborghini", "VF1": "Renault", "VF3": "Peugeot", "VF7": "Citroën",
+	"LFV": "FAW-Volkswagen", "LHG": "Honda (China)", "LSG": "SAIC GM", "LVS": "Ford (China)", "MA1": "Mahindra", "MA3": "Mahindra", "MAT": "Tata",
+}
+
+func vinCountry(first byte) string {
+	switch {
+	case strings.ContainsRune("145", rune(first)):
+		return "United States"
+	case first == '2':
+		return "Canada"
+	case first == '3':
+		return "Mexico"
+	case first == '6':
+		return "Australia"
+	case first == '7':
+		return "New Zealand"
+	case first == '8' || first == '9':
+		return "South America"
+	case first == 'A':
+		return "South Africa"
+	case first >= 'B' && first <= 'H':
+		return "Africa"
+	case first == 'J':
+		return "Japan"
+	case first == 'K':
+		return "South Korea"
+	case first == 'L':
+		return "China"
+	case first == 'M':
+		return "India/Southeast Asia"
+	case first == 'N':
+		return "Iran/Pakistan/Turkey"
+	case first == 'P':
+		return "Philippines"
+	case first == 'R':
+		return "Taiwan/UAE"
+	case first == 'S':
+		return "United Kingdom"
+	case first == 'T':
+		return "Switzerland/Czech Republic"
+	case first == 'U':
+		return "Romania"
+	case first == 'V':
+		return "France/Spain/Austria"
+	case first == 'W':
+		return "Germany"
+	case first == 'X':
+		return "Russia/Netherlands"
+	case first == 'Y':
+		return "Sweden/Finland/Belgium"
+	case first == 'Z':
+		return "Italy"
+	default:
+		return "Unknown"
+	}
+}
+
+func vinModelYear(value byte) string {
+	newYear, oldYear := 0, 0
+	switch value {
+	case 'A':
+		newYear, oldYear = 2010, 1980
+	case 'B':
+		newYear, oldYear = 2011, 1981
+	case 'C':
+		newYear, oldYear = 2012, 1982
+	case 'D':
+		newYear, oldYear = 2013, 1983
+	case 'E':
+		newYear, oldYear = 2014, 1984
+	case 'F':
+		newYear, oldYear = 2015, 1985
+	case 'G':
+		newYear, oldYear = 2016, 1986
+	case 'H':
+		newYear, oldYear = 2017, 1987
+	case 'J':
+		newYear, oldYear = 2018, 1988
+	case 'K':
+		newYear, oldYear = 2019, 1989
+	case 'L':
+		newYear, oldYear = 2020, 1990
+	case 'M':
+		newYear, oldYear = 2021, 1991
+	case 'N':
+		newYear, oldYear = 2022, 1992
+	case 'P':
+		newYear, oldYear = 2023, 1993
+	case 'R':
+		newYear, oldYear = 2024, 1994
+	case 'S':
+		newYear, oldYear = 2025, 1995
+	case 'T':
+		newYear, oldYear = 2026, 1996
+	case 'V':
+		newYear, oldYear = 2028, 1998
+	case 'W':
+		newYear, oldYear = 2029, 1999
+	case 'X':
+		newYear, oldYear = 2030, 2000
+	case 'Y':
+		newYear, oldYear = 2031, 2001
+	case '1':
+		newYear, oldYear = 2031, 2001
+	case '2':
+		newYear, oldYear = 2032, 2002
+	case '3':
+		newYear, oldYear = 2033, 2003
+	case '4':
+		newYear, oldYear = 2034, 2004
+	case '5':
+		newYear, oldYear = 2035, 2005
+	case '6':
+		newYear, oldYear = 2036, 2006
+	case '7':
+		newYear, oldYear = 2037, 2007
+	case '8':
+		newYear, oldYear = 2038, 2008
+	case '9':
+		newYear, oldYear = 2039, 2009
+	default:
+		return "Unknown"
+	}
+	if newYear <= time.Now().UTC().Year() {
+		return fmt.Sprintf("%d or %d", newYear, oldYear)
+	}
+	return strconv.Itoa(oldYear)
+}
 
 func parseVIN(input string, options types.ParseOptions) (*types.IDInfo, error) {
 	clean := strings.ToUpper(strings.ReplaceAll(input, "-", ""))
@@ -1544,10 +2019,7 @@ func parseVIN(input string, options types.ParseOptions) (*types.IDInfo, error) {
 			return nil, errors.New("invalid VIN character")
 		}
 	}
-	country := map[byte]string{'1': "United States", '2': "Canada", '3': "Mexico", 'J': "Japan", 'K': "South Korea", 'L': "China", 'S': "United Kingdom", 'W': "Germany", 'Z': "Italy"}[clean[0]]
-	if country == "" {
-		country = "Unknown"
-	}
+	country := vinCountry(clean[0])
 	manufacturer := vinManufacturers[clean[:3]]
 	version := country
 	if manufacturer != "" {
@@ -1555,6 +2027,7 @@ func parseVIN(input string, options types.ParseOptions) (*types.IDInfo, error) {
 	}
 	info := asciiInfo("VIN (Vehicle Identification Number)", version, clean[:3]+"-"+clean[3:9]+"-"+clean[9:11]+"-"+clean[11:], "as ASCII", clean, 0)
 	info.Node1 = stringPtr(fmt.Sprintf("%s (Model)", clean[3:8]))
+	info.Node2 = stringPtr(fmt.Sprintf("Model year: %s", vinModelYear(clean[9])))
 	info.Node3 = stringPtr(fmt.Sprintf("Factory: %s", clean[10:11]))
 	if number := parseInt64(clean[11:]); number > 0 {
 		info.Sequence = int64Ptr(number)
@@ -1661,11 +2134,11 @@ func parseASIN(input string, options types.ParseOptions) (*types.IDInfo, error) 
 	if len(input) != 10 {
 		return nil, errors.New("invalid ASIN")
 	}
-	value, err := decodeBase(strings.ToUpper(input), "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+	value, err := decodeBase(input, "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ")
 	if err != nil {
 		return nil, err
 	}
-	info := asciiInfo("ASIN (Amazon)", "", input, "as integer, from base36", input, 0)
+	info := infoFromBytes("ASIN (Amazon)", "", input, "as integer, from base36", bigEndianBytes(value, 8), 64, 0)
 	setIntegerValue(info, value, 8)
 	info.Sequence = int64Ptr(value.Int64())
 	info.HighConfidence = value.Cmp(new(big.Int).SetUint64(1117159523352576)) >= 0
@@ -1730,7 +2203,7 @@ func parseBitcoin(input string, options types.ParseOptions) (*types.IDInfo, erro
 
 func parseBitcoinBech32(input string) (*types.IDInfo, error) {
 	lower := strings.ToLower(input)
-	if len(lower) < 14 || len(lower) > 74 || !strings.HasPrefix(lower, "bc1") || input != lower && input != strings.ToUpper(input) {
+	if len(lower) < 14 || len(lower) > 74 || !strings.HasPrefix(lower, "bc1") {
 		return nil, errors.New("invalid Bitcoin bech32 address")
 	}
 	separator := strings.LastIndexByte(lower, '1')
@@ -1763,9 +2236,13 @@ func parseBitcoinBech32(input string) (*types.IDInfo, error) {
 	}
 	checksum := values[len(values)-6:]
 	bytes := append([]byte{version}, program...)
+	checksumBytes, ok := convertBits(checksum, 5, 8, true)
+	if !ok {
+		return nil, errors.New("invalid Bitcoin bech32 checksum encoding")
+	}
+	bytes = append(bytes, checksumBytes...)
 	info := infoFromBytes("Bitcoin Address", name, lower, "from bech32", bytes, len(bytes)*8, len(program)*8)
-	info.Node1 = stringPtr(fmt.Sprintf("%s (Checksum)", dataPart[len(dataPart)-6:]))
-	_ = checksum
+	info.Node1 = stringPtr(fmt.Sprintf("%s (Checksum, %s in hex)", dataPart[len(dataPart)-6:], hex.EncodeToString(checksumBytes)))
 	return info, nil
 }
 
@@ -1853,25 +2330,23 @@ func parseEthereum(input string, options types.ParseOptions) (*types.IDInfo, err
 }
 
 func parseIPFS(input string, options types.ParseOptions) (*types.IDInfo, error) {
-	if len(input) == 46 && strings.HasPrefix(input, "Qm") {
-		data, err := decodeBase58Bytes(input)
-		if err != nil || len(data) != 34 || data[0] != 0x12 || data[1] != 0x20 {
-			return nil, errors.New("invalid CID v0")
-		}
-		return infoFromBytes("IPFS", "CID v0", input, "from base58btc", data, len(data)*8, 256), nil
+	value, err := cid.Decode(input)
+	if err != nil {
+		return nil, errors.New("invalid CID")
 	}
-	if len(input) < 3 || input[0] != 'b' {
-		return nil, errors.New("invalid CID v1")
-	}
-	data, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(strings.ToUpper(input[1:]))
-	if err != nil || len(data) < 4 || data[0] != 1 {
-		return nil, errors.New("invalid CID v1")
+	data := value.Bytes()
+	hash, err := mh.Decode(value.Hash())
+	if err != nil {
+		return nil, errors.New("invalid CID multihash")
 	}
 	version := "CID v1"
-	if strings.HasPrefix(input, "k51") {
+	parsed := "from base32"
+	if value.Version() == 0 {
+		version, parsed = "CID v0", "from base58btc"
+	} else if value.Type() == 114 {
 		version = "CID v1 (IPNS)"
 	}
-	return infoFromBytes("IPFS", version, input, "from base32", data, len(data)*8, 256), nil
+	return infoFromBytes("IPFS", version, input, parsed, data, len(data)*8, hash.Length*8), nil
 }
 
 func parseH3(input string, options types.ParseOptions) (*types.IDInfo, error) {
@@ -1879,14 +2354,26 @@ func parseH3(input string, options types.ParseOptions) (*types.IDInfo, error) {
 		return nil, errors.New("invalid H3 index")
 	}
 	value, err := strconv.ParseUint(input, 16, 64)
-	if err != nil || (value>>59)&0xf != 1 || value&0x7 != 7 {
+	if err != nil {
 		return nil, errors.New("invalid H3 index")
 	}
-	resolution := (value >> 52) & 0xf
-	baseCell := (value >> 45) & 0x7f
-	info := infoFromBytes("H3 Grid System", "H3 Cell (Mode 1)", input, "from hex", bigEndianBytes(new(big.Int).SetUint64(value), 8), 64, -1)
+	cell := h3.CellFromString(input)
+	if !cell.IsValid() {
+		return nil, errors.New("invalid H3 index")
+	}
+	center, err := cell.LatLng()
+	if err != nil {
+		return nil, err
+	}
+	shape := "hexagon"
+	if cell.IsPentagon() {
+		shape = "pentagon"
+	}
+	info := infoFromBytes("H3 Grid System", "H3 Cell (Mode 1)", h3.CellToString(cell), "from hex", bigEndianBytes(new(big.Int).SetUint64(value), 8), 64, 0)
 	setIntegerValue(info, new(big.Int).SetUint64(value), 8)
-	info.Node1 = stringPtr(fmt.Sprintf("Resolution: %d, base cell: %d", resolution, baseCell))
+	info.Node1 = stringPtr(fmt.Sprintf("Resolution: %d, base cell: %d (%s)", cell.Resolution(), cell.BaseCellNumber(), shape))
+	info.Node2 = stringPtr(fmt.Sprintf("Center (lon, lat): %.6f, %.6f", center.Lng, center.Lat))
+	info.HighConfidence = true
 	return info, nil
 }
 
@@ -1909,6 +2396,9 @@ func parseKSUIDAligned(input string, options types.ParseOptions) (*types.IDInfo,
 	var data []byte
 	version, parsed := "Base62-encoded", "from base62"
 	if len(input) == 27 {
+		if input > "aWgEPTl1tmebfsQzFP4bxwgy80V" {
+			return nil, errors.New("invalid KSUID range")
+		}
 		value, err := decodeBase(input, "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
 		if err != nil || value.BitLen() > 160 {
 			return nil, errors.New("invalid KSUID")
@@ -2042,10 +2532,7 @@ func parseAlignedByName(name, input string, options types.ParseOptions) (*types.
 	case "breezeid":
 		return parseBreezeID(input, options)
 	case "puid":
-		if len(input) == 24 {
-			return parsePUID(input, options)
-		}
-		return parseShortPUID(input, options)
+		return parsePUID(input, options)
 	case "shortpuid":
 		return parseShortPUID(input, options)
 	case "tid":

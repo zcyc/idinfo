@@ -27,11 +27,18 @@ func main() {
 		alphabet     = flag.String("a", "", "Custom alphabet for Sqids and Nano ID")
 		relative     = flag.Bool("r", false, "Show relative time if available")
 		salt         = flag.String("salt", "", "Custom salt for Hashids")
-		epoch        = flag.Int64("epoch", 0, "Override epoch (seconds since 1970-01-01 UTC)")
+		epoch        = flag.Uint64("epoch", 0, "Override epoch (seconds since 1970-01-01 UTC)")
 		version      = flag.Bool("version", false, "Show version")
 		help         = flag.Bool("help", false, "Show help")
 	)
-	flag.Parse()
+	flag.CommandLine.StringVar(forceFormat, "force", *forceFormat, "Force parsing as specific format")
+	flag.CommandLine.StringVar(outputFormat, "output", *outputFormat, "Output format (card, short, json, binary)")
+	flag.CommandLine.BoolVar(everything, "everything", *everything, "Show all possible format interpretations")
+	flag.CommandLine.StringVar(alphabet, "alphabet", *alphabet, "Custom alphabet for Sqids and Nano ID")
+	flag.CommandLine.BoolVar(relative, "relative", *relative, "Show relative time if available")
+	flag.CommandLine.BoolVar(help, "h", *help, "Show help")
+	flag.CommandLine.BoolVar(version, "V", *version, "Show version")
+	flag.CommandLine.Parse(normalizeIDArgs(os.Args[1:]))
 
 	if *help {
 		showHelp()
@@ -56,8 +63,9 @@ func main() {
 		os.Exit(1)
 	}
 
+	compareMode := *compare || *compareShort
 	var input string
-	if args[0] == "-" {
+	if args[0] == "-" && !compareMode {
 		// Read from stdin
 		scanner := bufio.NewScanner(os.Stdin)
 		if scanner.Scan() {
@@ -84,7 +92,6 @@ func main() {
 			options.Epoch, options.HasEpoch = *epoch, true
 		}
 	})
-	compareMode := *compare || *compareShort
 	var results []*types.IDInfo
 	if *everything || compareMode {
 		if *everything {
@@ -111,15 +118,7 @@ func main() {
 
 	if *relative {
 		for _, info := range results {
-			if info.DateTime == nil {
-				continue
-			}
-			diff := time.Since(*info.DateTime)
-			value := "in " + relativeDuration(-diff)
-			if diff >= 0 {
-				value = relativeDuration(diff) + " ago"
-			}
-			info.Relative = &value
+			setRelativeTime(info)
 		}
 	}
 
@@ -147,7 +146,11 @@ func main() {
 	case "short":
 		output.ShowShort(result)
 	case "json":
-		jsonOutput, err := json.MarshalIndent(result, "", "  ")
+		jsonResult := *result
+		if !*relative {
+			setRelativeTime(&jsonResult)
+		}
+		jsonOutput, err := json.MarshalIndent(jsonResult, "", "  ")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error generating JSON output: %v\n", err)
 			fmt.Fprintf(os.Stderr, "This is likely due to invalid data in the parsed result.\n")
@@ -161,6 +164,66 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Supported formats: card, short, json, binary\n")
 		os.Exit(1)
 	}
+}
+
+func setRelativeTime(info *types.IDInfo) {
+	if info.DateTime == nil {
+		return
+	}
+	diff := time.Since(*info.DateTime)
+	value := "in " + relativeDuration(-diff)
+	if diff >= 0 {
+		value = relativeDuration(diff) + " ago"
+	}
+	info.Relative = &value
+}
+
+func normalizeIDArgs(args []string) []string {
+	booleanFlags := map[string]bool{
+		"-e": true, "--everything": true, "-c": true, "--compare": true, "--color": true,
+		"-r": true, "--relative": true, "--version": true, "--help": true, "-h": true, "-V": true,
+	}
+	valueFlags := map[string]bool{
+		"-f": true, "--force": true, "-o": true, "--output": true, "-g": true, "--generate": true,
+		"-a": true, "--alphabet": true, "--salt": true, "--epoch": true,
+	}
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		if arg == "--" || !strings.HasPrefix(arg, "-") {
+			if !strings.HasPrefix(arg, "-") {
+				continue
+			}
+			return args
+		}
+		name := arg
+		if equal := strings.IndexByte(name, '='); equal >= 0 {
+			name = name[:equal]
+		}
+		if valueFlags[name] {
+			if !strings.ContainsRune(arg, '=') {
+				index++
+			}
+			continue
+		}
+		if !strings.HasPrefix(arg, "--") && len(arg) > 2 && valueFlags[arg[:2]] {
+			result := make([]string, 0, len(args)+1)
+			result = append(result, args[:index]...)
+			result = append(result, arg[:2], arg[2:])
+			result = append(result, args[index+1:]...)
+			return result
+		}
+		if booleanFlags[name] {
+			continue
+		}
+		if !strings.HasPrefix(arg, "--") {
+			result := make([]string, 0, len(args)+1)
+			result = append(result, args[:index]...)
+			result = append(result, "--", arg)
+			result = append(result, args[index+1:]...)
+			return result
+		}
+	}
+	return args
 }
 
 func handleGeneration(format string) {
@@ -181,8 +244,21 @@ func handleGeneration(format string) {
 
 	// Use existing parser for other formats or plain "uuid"
 	registry := parsers.NewRegistry()
-	parser := registry.GetParser(format)
-	if parser == nil {
+	var id string
+	var err error
+	found := false
+	for _, parser := range registry.GetAllParsers() {
+		if !strings.EqualFold(parser.Name(), format) {
+			continue
+		}
+		found = true
+		id, err = parser.Generate()
+		if err == nil {
+			fmt.Println(id)
+			return
+		}
+	}
+	if !found {
 		fmt.Fprintf(os.Stderr, "Error: Unsupported format '%s'\n", format)
 		fmt.Fprintf(os.Stderr, "Supported formats: ")
 		parserNames := registry.GetAvailableParsers()
@@ -195,14 +271,8 @@ func handleGeneration(format string) {
 		fmt.Fprintf(os.Stderr, "\nFor UUID, you can also specify version: uuid:v1, uuid:v3, uuid:v4, uuid:v5, uuid:v6, uuid:v7\n")
 		os.Exit(1)
 	}
-
-	id, err := parser.Generate()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error generating %s: %v\n", format, err)
-		os.Exit(1)
-	}
-
-	fmt.Println(id)
+	fmt.Fprintf(os.Stderr, "Error generating %s: %v\n", format, err)
+	os.Exit(1)
 }
 
 func generateUUIDWithVersion(version string) (string, error) {

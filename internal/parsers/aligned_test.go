@@ -121,4 +121,54 @@ func TestAlignedMetadataAndOptions(t *testing.T) {
 	if len(auto) != 1 || auto[0].IDType != "Julid" {
 		t.Fatalf("expected auto-detected Julid, got %#v", auto)
 	}
+
+	isbn := ParseIDWithOptions("9780553382570", "isbn", types.ParseOptions{})[0]
+	if isbn.Standard != "978-0-553-38257-0" || *isbn.Node2 != "553 (Publisher ID)" || *isbn.Sequence != 38257 {
+		t.Fatalf("unexpected ISBN metadata: %#v", isbn)
+	}
+}
+
+func TestAlignedForceFormats(t *testing.T) {
+	cases := []struct {
+		format, input, idType, version string
+	}{
+		{"uuid", "215d3d9f-e980-2cf4-9191-7dd485ba4fee", "UUID (RFC-4122)", "2 (DCE security)"},
+		{"uuid", "906b4e7f-84a3-a0ed-1191-2dea8b497113", "NCS UUID", ""},
+		{"uuid-int", "2093703425379131962944436515747969848", "Integer of UUID (RFC-9562)", "7 (sortable timestamp and random)"},
+		{"ulid", "01933b98-7e9f-bde4-2a24-7c603489e802", "ULID wrapped in UUID", ""},
+		{"julid", "01JCXSGZMZQQJ2M93WC0T8KT02", "Julid", ""},
+		{"sf-twitter", "1777150623882019211", "Snowflake", "Twitter"},
+		{"sf-discord", "1304369705066434662", "Snowflake", "Discord"},
+		{"sf-instagram", "1671390786412876801", "Snowflake", "Instagram"},
+		{"sf-sony", "540226260526170119", "Snowflake", "Sony"},
+		{"sf-spaceflake", "1015189130756840860", "Snowflake", "Spaceflake"},
+		{"sf-mastodon", "112277929257317646", "Snowflake", "Mastodon"},
+		{"sf-linkedin", "7256902784527069184", "Snowflake", "LinkedIn"},
+		{"sf-flakeid", "5828128208445124608", "Snowflake", "Flake ID"},
+		{"sf-frostflake", "7423342004626526207", "Snowflake", "Frostflake"},
+		{"sf-frostflake", "JERHwh5PXjL", "Snowflake", "Frostflake"},
+		{"sf-simpleflake", "3594162604452825250", "Snowflake", "Simpleflake"},
+		{"unix-s", "1734971723", "Unix timestamp", "As seconds"},
+		{"unix-ms", "1734971723000", "Unix timestamp", "As milliseconds"},
+		{"unix-us", "1734971723000000", "Unix timestamp", "As microseconds"},
+		{"unix-ns", "1734971723000000000", "Unix timestamp", "As nanoseconds"},
+		{"isbn", "0-553-38257-8", "ISBN-10", ""},
+		{"commerce", "0-42100-00526-4", "Commerce Barcode", "UPC-A (GTIN-12)"},
+		{"commerce", "9638-5074", "Commerce Barcode", "EAN-8 (GTIN-8)"},
+		{"commerce", "1-06-14141-000415", "Commerce Barcode", "GTIN-14, grouping/packaging level"},
+		{"ipfs", "k51qzi5uqu5dlvj2baxnqndepeb86cbk3ng7n3i46uzyxzyqj2xjonzllnv0v8", "IPFS", "CID v1 (IPNS)"},
+		{"iban", "NO9386011117947", "IBAN", "NO (Norway)"},
+		{"mist", "171671", "Mist", ""},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.format+"/"+testCase.input, func(t *testing.T) {
+			results := ParseIDWithOptions(testCase.input, testCase.format, types.ParseOptions{})
+			if len(results) != 1 {
+				t.Fatalf("expected one result, got %d", len(results))
+			}
+			if results[0].IDType != testCase.idType || results[0].Version != testCase.version {
+				t.Fatalf("got %q / %q, want %q / %q", results[0].IDType, results[0].Version, testCase.idType, testCase.version)
+			}
+		})
+	}
 }

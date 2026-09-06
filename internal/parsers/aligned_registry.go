@@ -132,11 +132,11 @@ func autoDetectAligned(input string, options types.ParseOptions) (*types.IDInfo,
 		case 15:
 			names = []string{"h3"}
 		case 14:
-			names = []string{"puid"}
+			names = []string{"shortpuid"}
 		case 13:
 			names = []string{"tid", "tsid"}
 		case 12:
-			names = []string{"scru64", "puid"}
+			names = []string{"scru64", "shortpuid"}
 		case 11:
 			names = []string{"slack", "youtube", "snowid"}
 		case 10:
@@ -155,7 +155,13 @@ func autoDetectAligned(input string, options types.ParseOptions) (*types.IDInfo,
 func ParseIDWithOptions(input, force string, options types.ParseOptions) []*types.IDInfo {
 	input = strings.TrimSpace(input)
 	if force != "" {
-		if info, err := parseNameWithOptions(canonicalForce(force), input, options); err == nil {
+		name := canonicalForce(force)
+		if name == "puid" {
+			if info, err := parsePUIDAny(input, options); err == nil {
+				return []*types.IDInfo{info}
+			}
+		}
+		if info, err := parseNameWithOptions(name, input, options); err == nil {
 			return []*types.IDInfo{info}
 		}
 		return nil

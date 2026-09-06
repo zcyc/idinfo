@@ -18,19 +18,17 @@ func ShowCard(info *types.IDInfo) {
 	// ID Type
 	fmt.Printf("┃ %-9s │ %-43s ┃\n", "ID Type", info.IDType)
 
-	// Version (if available)
-	if info.Version != "" {
-		fmt.Printf("┃ %-9s │ %-43s ┃\n", "Version", info.Version)
+	// Rust's card always includes the optional fields as "-".
+	version := info.Version
+	if version == "" {
+		version = "-"
 	}
+	fmt.Printf("┃ %-9s │ %-43s ┃\n", "Version", version)
 
 	fmt.Println("┠───────────┼─────────────────────────────────────────────┨")
 
 	// Standard representation
 	fmt.Printf("┃ %-9s │ %-43s ┃\n", "String", info.Standard)
-	if info.UUIDWrap != nil {
-		fmt.Printf("┃ %-9s │ %-43s ┃\n", "UUID wrap", *info.UUIDWrap)
-	}
-
 	// Integer representation
 	if info.Integer != nil {
 		intStr := *info.Integer
@@ -39,31 +37,33 @@ func ShowCard(info *types.IDInfo) {
 		}
 		fmt.Printf("┃ %-9s │ %-43s ┃\n", "Integer", intStr)
 	}
-
-	// Additional representations
-	if info.ShortUUID != nil {
-		fmt.Printf("┃ %-9s │ %-43s ┃\n", "ShortUUID", *info.ShortUUID)
-	}
-	if info.Base64 != nil {
-		fmt.Printf("┃ %-9s │ %-43s ┃\n", "Base64", *info.Base64)
+	if info.UUIDWrap != nil {
+		fmt.Printf("┃ %-9s │ %-43s ┃\n", "UUID wrap", *info.UUIDWrap)
 	}
 
 	fmt.Println("┠───────────┼─────────────────────────────────────────────┨")
 
 	// Size and entropy
 	fmt.Printf("┃ %-9s │ %-43s ┃\n", "Size", sizeDescription(info))
-	if info.Entropy != nil {
-		fmt.Printf("┃ %-9s │ %-43s ┃\n", "Entropy", fmt.Sprintf("%d bits", *info.Entropy))
+	entropy := "-"
+	if info.Size > 0 {
+		value := 0
+		if info.Entropy != nil {
+			value = *info.Entropy
+		}
+		entropy = fmt.Sprintf("%d bits", value)
 	}
+	fmt.Printf("┃ %-9s │ %-43s ┃\n", "Entropy", entropy)
 
 	// Timestamp
-	if info.DateTime != nil {
-		timeStr := info.DateTime.Format(time.RFC3339)
-		if info.Timestamp != nil {
-			timeStr = fmt.Sprintf("%s (%s)", *info.Timestamp, timeStr)
+	timeStr := "-"
+	if info.Timestamp != nil {
+		timeStr = *info.Timestamp
+		if info.DateTime != nil {
+			timeStr = fmt.Sprintf("%s (%s)", timeStr, info.DateTime.UTC().Format("2006-01-02T15:04:05.000Z07:00"))
 		}
-		fmt.Printf("┃ %-9s │ %-43s ┃\n", "Timestamp", timeStr)
 	}
+	fmt.Printf("┃ %-9s │ %-43s ┃\n", "Timestamp", timeStr)
 	if info.Relative != nil {
 		fmt.Printf("┃ %-9s │ %-43s ┃\n", "Relative", *info.Relative)
 	}
@@ -210,7 +210,7 @@ func ShowComparison(results []*types.IDInfo) {
 	timestamps = append(timestamps, timestampInfo{format: "--- Now ---", timestamp: now})
 
 	// Sort by timestamp
-	sort.Slice(timestamps, func(i, j int) bool {
+	sort.SliceStable(timestamps, func(i, j int) bool {
 		return timestamps[i].timestamp.Before(timestamps[j].timestamp)
 	})
 

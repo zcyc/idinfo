@@ -3,7 +3,6 @@ package output
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/zcyc/idinfo/internal/types"
 
@@ -31,14 +30,16 @@ func ShowCardColored(info *types.IDInfo) {
 	valueColor.Printf("%-43s ", info.IDType)
 	borderColor.Println("┃")
 
-	// Version (if available)
-	if info.Version != "" {
-		borderColor.Print("┃ ")
-		labelColor.Printf("%-9s ", "Version")
-		borderColor.Print("│ ")
-		valueColor.Printf("%-43s ", info.Version)
-		borderColor.Println("┃")
+	// Rust's card always includes the optional fields as "-".
+	version := info.Version
+	if version == "" {
+		version = "-"
 	}
+	borderColor.Print("┃ ")
+	labelColor.Printf("%-9s ", "Version")
+	borderColor.Print("│ ")
+	valueColor.Printf("%-43s ", version)
+	borderColor.Println("┃")
 
 	borderColor.Println("┠───────────┼─────────────────────────────────────────────┨")
 
@@ -48,14 +49,6 @@ func ShowCardColored(info *types.IDInfo) {
 	borderColor.Print("│ ")
 	valueColor.Printf("%-43s ", info.Standard)
 	borderColor.Println("┃")
-	if info.UUIDWrap != nil {
-		borderColor.Print("┃ ")
-		labelColor.Printf("%-9s ", "UUID wrap")
-		borderColor.Print("│ ")
-		valueColor.Printf("%-43s ", *info.UUIDWrap)
-		borderColor.Println("┃")
-	}
-
 	// Integer representation
 	if info.Integer != nil {
 		intStr := *info.Integer
@@ -69,19 +62,11 @@ func ShowCardColored(info *types.IDInfo) {
 		borderColor.Println("┃")
 	}
 
-	// Additional representations
-	if info.ShortUUID != nil {
+	if info.UUIDWrap != nil {
 		borderColor.Print("┃ ")
-		labelColor.Printf("%-9s ", "ShortUUID")
+		labelColor.Printf("%-9s ", "UUID wrap")
 		borderColor.Print("│ ")
-		valueColor.Printf("%-43s ", *info.ShortUUID)
-		borderColor.Println("┃")
-	}
-	if info.Base64 != nil {
-		borderColor.Print("┃ ")
-		labelColor.Printf("%-9s ", "Base64")
-		borderColor.Print("│ ")
-		valueColor.Printf("%-43s ", *info.Base64)
+		valueColor.Printf("%-43s ", *info.UUIDWrap)
 		borderColor.Println("┃")
 	}
 
@@ -94,29 +79,36 @@ func ShowCardColored(info *types.IDInfo) {
 	valueColor.Printf("%-43s ", sizeDescription(info))
 	borderColor.Println("┃")
 
-	if info.Entropy != nil {
-		borderColor.Print("┃ ")
-		labelColor.Printf("%-9s ", "Entropy")
-		borderColor.Print("│ ")
-		valueColor.Printf("%-43s ", fmt.Sprintf("%d bits", *info.Entropy))
-		borderColor.Println("┃")
+	entropy := "-"
+	if info.Size > 0 {
+		value := 0
+		if info.Entropy != nil {
+			value = *info.Entropy
+		}
+		entropy = fmt.Sprintf("%d bits", value)
 	}
+	borderColor.Print("┃ ")
+	labelColor.Printf("%-9s ", "Entropy")
+	borderColor.Print("│ ")
+	valueColor.Printf("%-43s ", entropy)
+	borderColor.Println("┃")
 
 	// Timestamp
-	if info.DateTime != nil {
-		timeStr := info.DateTime.Format(time.RFC3339)
-		if info.Timestamp != nil {
-			timeStr = fmt.Sprintf("%s (%s)", *info.Timestamp, timeStr)
+	timeStr := "-"
+	if info.Timestamp != nil {
+		timeStr = *info.Timestamp
+		if info.DateTime != nil {
+			timeStr = fmt.Sprintf("%s (%s)", timeStr, info.DateTime.UTC().Format("2006-01-02T15:04:05.000Z07:00"))
 		}
-		if len(timeStr) > 43 {
-			timeStr = timeStr[:40] + "..."
-		}
-		borderColor.Print("┃ ")
-		labelColor.Printf("%-9s ", "Timestamp")
-		borderColor.Print("│ ")
-		valueColor.Printf("%-43s ", timeStr)
-		borderColor.Println("┃")
 	}
+	if len(timeStr) > 43 {
+		timeStr = timeStr[:40] + "..."
+	}
+	borderColor.Print("┃ ")
+	labelColor.Printf("%-9s ", "Timestamp")
+	borderColor.Print("│ ")
+	valueColor.Printf("%-43s ", timeStr)
+	borderColor.Println("┃")
 	if info.Relative != nil {
 		borderColor.Print("┃ ")
 		labelColor.Printf("%-9s ", "Relative")
