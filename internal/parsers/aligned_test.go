@@ -374,6 +374,20 @@ func TestUnsignedDecimalVariants(t *testing.T) {
 	}
 }
 
+func TestSCRU128AcceptsUppercaseBase36(t *testing.T) {
+	for _, tc := range []struct {
+		input, want string
+	}{
+		{"CM3XEMK9O00070CM7GHNL6TOE", "cm3xemk9o00070cm7ghnl6toe"},
+		{"03CWIVKME1QHJ3CRPRQUJV4LU", "03cwivkme1qhj3crprqujv4lu"},
+	} {
+		results := ParseIDWithOptions(tc.input, "scru128", types.ParseOptions{})
+		if len(results) != 1 || results[0].Standard != tc.want {
+			t.Fatalf("SCRU128 %q: got %#v, want standard %q", tc.input, results, tc.want)
+		}
+	}
+}
+
 func TestShortUUIDDashIsNilUUID(t *testing.T) {
 	results := ParseIDWithOptions("-", "shortuuid", types.ParseOptions{})
 	if len(results) != 1 || results[0].IDType != "ShortUUID of Nil UUID (all zeros)" || results[0].Standard != "" {

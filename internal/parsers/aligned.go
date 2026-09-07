@@ -942,7 +942,7 @@ func parseFlake(input string, options types.ParseOptions) (*types.IDInfo, error)
 }
 
 func parseSCRU128Aligned(input string, options types.ParseOptions) (*types.IDInfo, error) {
-	value, err := decodeBase(input, "0123456789abcdefghijklmnopqrstuvwxyz")
+	value, err := decodeBase(strings.ToLower(input), "0123456789abcdefghijklmnopqrstuvwxyz")
 	fromBase36 := err == nil && len(input) == 25 && value.BitLen() <= 128
 	if !fromBase36 {
 		if input != strings.TrimSpace(input) {
