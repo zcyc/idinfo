@@ -249,6 +249,11 @@ func ShowComparison(results []*types.IDInfo) {
 	fmt.Println("Date/times of the valid IDs parsed as:")
 
 	for _, ts := range timestamps {
-		fmt.Printf("- %s %s\n", ts.timestamp.UTC().Format("2006-01-02T15:04:05.000Z07:00"), ts.format)
+		fmt.Printf("- %s ", ts.timestamp.UTC().Format("2006-01-02T15:04:05.000Z07:00"))
+		if ts.format == "--- Now ---" {
+			nowColor.Println(ts.format)
+		} else {
+			fmt.Println(ts.format)
+		}
 	}
 }

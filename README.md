@@ -94,10 +94,6 @@ ipv4 ipv6 mac imei isbn h3
 - DUNS、ASIN、Google Docs、Slack、Spotify、SWHID、IBAN、ISBN、VIN 和商业条码
 - Bitcoin、Ethereum、IPFS、IPv4、IPv6、MAC、IMEI、H3 和十六进制 Hash
 
-### idinfo 扩展格式
-
-`base58`、`base32`、`snowflake`、`isbn10` 和 `shortpuid` 是 idinfo 的额外解析名称，不属于 uuinfo 的 canonical `--force` 选项；其中 `base58` 和 `base32` 只能通过强制格式使用。
-
 ## 输出示例
 
 ### Card（默认）

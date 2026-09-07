@@ -366,6 +366,7 @@ func hashIDUnhashChecked(input, alphabet []rune) (uint64, bool) {
 }
 
 func parseBigDecimal(value string, bits int) (*big.Int, error) {
+	value = strings.TrimSpace(value)
 	if value == "" || strings.HasPrefix(value, "-") {
 		return nil, errors.New("not an unsigned integer")
 	}
@@ -491,6 +492,9 @@ func formatNodeID(data []byte) string {
 }
 
 func parseUUIDAligned(input string, options types.ParseOptions) (*types.IDInfo, error) {
+	if input != strings.TrimSpace(input) {
+		return nil, errors.New("invalid UUID whitespace")
+	}
 	value, err := uuid.Parse(input)
 	if err != nil {
 		return nil, err
@@ -554,11 +558,19 @@ func parseUUIDAligned(input string, options types.ParseOptions) (*types.IDInfo, 
 }
 
 func parseShortUUIDAligned(input string, options types.ParseOptions) (*types.IDInfo, error) {
-	value, err := decodeBase(input, shortUUIDRustAlphabet)
+	value := new(big.Int)
+	var err error
+	if input != "-" {
+		value, err = decodeBase(input, shortUUIDRustAlphabet)
+	}
 	if err != nil || value.BitLen() > 128 {
 		return nil, errors.New("invalid ShortUUID")
 	}
-	return withUUIDWrapper(input, options, "ShortUUID", "from base57", bigEndianBytes(value, 16))
+	info, err := withUUIDWrapper(input, options, "ShortUUID", "from base57", bigEndianBytes(value, 16))
+	if err == nil && input == "-" {
+		info.Standard = ""
+	}
+	return info, err
 }
 
 func withUUIDWrapper(input string, options types.ParseOptions, prefix, parsed string, data []byte) (*types.IDInfo, error) {
@@ -641,6 +653,9 @@ func parseUUID25(input string, options types.ParseOptions) (*types.IDInfo, error
 }
 
 func parseULIDAligned(input string, options types.ParseOptions) (*types.IDInfo, error) {
+	if input != strings.TrimSpace(input) {
+		return nil, errors.New("invalid ULID whitespace")
+	}
 	value, err := ulid.Parse(input)
 	fromBase32 := err == nil
 	if err != nil {
@@ -766,6 +781,9 @@ func encodeUPID(data []byte) string {
 }
 
 func parseUPID(input string, options types.ParseOptions) (*types.IDInfo, error) {
+	if input != strings.TrimSpace(input) {
+		return nil, errors.New("invalid UPID whitespace")
+	}
 	value, err := decodeUPID(input)
 	fromBase32 := err == nil
 	if !fromBase32 {
@@ -810,6 +828,7 @@ func encodeSandflake(data []byte) string {
 }
 
 func parseSandflake(input string, options types.ParseOptions) (*types.IDInfo, error) {
+	input = strings.TrimSpace(input)
 	var data []byte
 	var idType, parsed string
 	if len(input) == 26 {
@@ -862,6 +881,9 @@ func parseTimeflake(input string, options types.ParseOptions) (*types.IDInfo, er
 		}
 		idType, parsed = "Timeflake", "from hex"
 	case 36:
+		if input != strings.TrimSpace(input) {
+			return nil, errors.New("invalid Timeflake whitespace")
+		}
 		value, err := uuid.Parse(input)
 		if err != nil {
 			return nil, err
@@ -894,6 +916,9 @@ func parseFlake(input string, options types.ParseOptions) (*types.IDInfo, error)
 		}
 		data, idType, parsed = bigEndianBytes(value, 16), "Flake (Boundary)", "from base62"
 	} else {
+		if input != strings.TrimSpace(input) {
+			return nil, errors.New("invalid Flake whitespace")
+		}
 		value, err := uuid.Parse(input)
 		if err != nil {
 			return nil, err
@@ -916,6 +941,9 @@ func parseSCRU128Aligned(input string, options types.ParseOptions) (*types.IDInf
 	value, err := decodeBase(input, "0123456789abcdefghijklmnopqrstuvwxyz")
 	fromBase36 := err == nil && len(input) == 25 && value.BitLen() <= 128
 	if !fromBase36 {
+		if input != strings.TrimSpace(input) {
+			return nil, errors.New("invalid SCRU128 whitespace")
+		}
 		wrapped, uuidErr := uuid.Parse(input)
 		if uuidErr != nil {
 			return nil, errors.New("invalid SCRU128")
@@ -954,14 +982,13 @@ func parseSCRU64Aligned(input string, options types.ParseOptions) (*types.IDInfo
 }
 
 func parseTSIDAligned(input string, options types.ParseOptions) (*types.IDInfo, error) {
-	input = strings.TrimSpace(input)
 	var value uint64
 	fromBase32 := false
 	if len([]rune(input)) == 13 && tsid.IsValidRuneArray([]rune(input)) {
 		value = uint64(tsid.FromString(input).ToNumber())
 		fromBase32 = true
 	} else {
-		parsed, err := strconv.ParseUint(input, 10, 64)
+		parsed, err := strconv.ParseUint(strings.TrimSpace(input), 10, 64)
 		if err != nil {
 			return nil, errors.New("invalid TSID")
 		}
@@ -980,6 +1007,9 @@ func parseTSIDAligned(input string, options types.ParseOptions) (*types.IDInfo, 
 }
 
 func parseDatadog(input string, options types.ParseOptions) (*types.IDInfo, error) {
+	if input != strings.TrimSpace(input) {
+		return nil, errors.New("invalid Datadog whitespace")
+	}
 	value, err := uuid.Parse(input)
 	if err != nil || value == uuid.Nil || binary.BigEndian.Uint32(value[4:8]) != 0 {
 		return nil, errors.New("invalid Datadog trace ID")
@@ -1007,6 +1037,9 @@ func parseSpotify(input string, options types.ParseOptions) (*types.IDInfo, erro
 }
 
 func parseComb(input string, options types.ParseOptions) (*types.IDInfo, error) {
+	if input != strings.TrimSpace(input) {
+		return nil, errors.New("invalid COMB whitespace")
+	}
 	value, err := uuid.Parse(input)
 	if err != nil || value.Version() != 4 || value.Variant() != uuid.RFC4122 {
 		return nil, errors.New("invalid COMB")
@@ -1626,6 +1659,7 @@ func parseSWHID(input string, options types.ParseOptions) (*types.IDInfo, error)
 }
 
 func parseISBN(input string, options types.ParseOptions) (*types.IDInfo, error) {
+	input = strings.TrimSpace(input)
 	clean := strings.ReplaceAll(input, "-", "")
 	if len(clean) == 13 && isDigits(clean) && (strings.HasPrefix(clean, "978") || strings.HasPrefix(clean, "979")) && isbn13Valid(clean) {
 		return isbnInfo(clean, "ISBN-13")
@@ -2468,7 +2502,7 @@ func parseThreads(input string, options types.ParseOptions) (*types.IDInfo, erro
 		parsed = "from base64"
 	} else {
 		var err error
-		number, err = strconv.ParseUint(input, 10, 64)
+		number, err = strconv.ParseUint(strings.TrimSpace(input), 10, 64)
 		if err != nil {
 			return nil, err
 		}
@@ -2485,7 +2519,7 @@ func parseThreads(input string, options types.ParseOptions) (*types.IDInfo, erro
 
 func parseSnowID(input string, options types.ParseOptions) (*types.IDInfo, error) {
 	fromBase62 := false
-	value, err := strconv.ParseUint(input, 10, 64)
+	value, err := strconv.ParseUint(strings.TrimSpace(input), 10, 64)
 	if err != nil {
 		encoded, decodeErr := decodeBase(input, base62Alphabet)
 		if decodeErr != nil || encoded.BitLen() > 64 {
@@ -2504,7 +2538,7 @@ func parseSnowID(input string, options types.ParseOptions) (*types.IDInfo, error
 }
 
 func parseMist(input string, options types.ParseOptions) (*types.IDInfo, error) {
-	value, err := strconv.ParseUint(input, 10, 64)
+	value, err := strconv.ParseUint(strings.TrimSpace(input), 10, 64)
 	if err != nil {
 		return nil, err
 	}

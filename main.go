@@ -62,11 +62,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: Please provide an ID to parse\n")
 		fmt.Fprintf(os.Stderr, "Usage: %s [OPTIONS] <ID>\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "Try '%s --help' for more information.\n", os.Args[0])
-		os.Exit(1)
+		os.Exit(2)
 	}
 
 	compareMode := *compare || *compareShort
-	var input string
+	input := args[0]
 	if args[0] == "-" && !compareMode {
 		// Read from stdin
 		scanner := bufio.NewScanner(os.Stdin)
@@ -78,8 +78,6 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Please ensure valid input is provided via pipe.\n")
 			os.Exit(1)
 		}
-	} else {
-		input = args[0]
 	}
 
 	options := types.ParseOptions{Alphabet: *alphabet, Salt: *salt}
@@ -104,6 +102,10 @@ func main() {
 		return
 	}
 	if len(results) == 0 {
+		if *everything {
+			fmt.Println("Unknown ID type.")
+			return
+		}
 		if *forceFormat != "" {
 			fmt.Println("Invalid ID for this format.")
 		} else {

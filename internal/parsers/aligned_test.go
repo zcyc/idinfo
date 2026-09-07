@@ -297,6 +297,60 @@ func TestLegacyForceAliasesAreRejected(t *testing.T) {
 	}
 }
 
+func TestWhitespaceMatchesUuinfo(t *testing.T) {
+	tests := []struct {
+		format string
+		input  string
+		valid  bool
+	}{
+		{"uuid", " 550e8400-e29b-41d4-a716-446655440000 ", false},
+		{"uuid-int", " 2093703425379131962944436515747969848 ", true},
+		{"isbn", " 9780553382570 ", true},
+		{"sandflake", " 05E4ECYW2GZ66B8AFZZZZMKFPR ", true},
+		{"tsid", " 01226n0640j7k ", false},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.format, func(t *testing.T) {
+			results := ParseIDWithOptions(testCase.input, testCase.format, types.ParseOptions{})
+			if (len(results) == 1) != testCase.valid {
+				t.Fatalf("got %d results for %q, want valid=%v", len(results), testCase.input, testCase.valid)
+			}
+		})
+	}
+}
+
+func TestShortUUIDDashIsNilUUID(t *testing.T) {
+	results := ParseIDWithOptions("-", "shortuuid", types.ParseOptions{})
+	if len(results) != 1 || results[0].IDType != "ShortUUID of Nil UUID (all zeros)" || results[0].Standard != "" {
+		t.Fatalf("unexpected short UUID result: %#v", results)
+	}
+}
+
+func TestColorMaps(t *testing.T) {
+	results := ParseIDWithOptions("550e8400-e29b-41d4-a716-446655440000", "uuid", types.ParseOptions{})
+	if len(results) != 1 || len(results[0].ColorMap) != 128 {
+		t.Fatalf("UUID color map has wrong length: %#v", results)
+	}
+	if results[0].ColorMap[48:52] != "1111" || results[0].ColorMap[64:66] != "00" {
+		t.Fatalf("UUID color map does not mark version/variant: %q", results[0].ColorMap)
+	}
+
+	for _, testCase := range []struct {
+		format string
+		input  string
+		want   string
+	}{
+		{"nuid", "EQyuCsA4ysv7ezXReOrk4i", strings.Repeat("2", 96) + strings.Repeat("4", 80)},
+		{"commerce", "5901234123457", strings.Repeat("4", 24) + strings.Repeat("2", 72) + strings.Repeat("0", 8)},
+		{"vin", "1HGCM82633A004352", strings.Repeat("1", 24) + strings.Repeat("4", 40) + strings.Repeat("0", 8) + strings.Repeat("5", 8) + strings.Repeat("7", 8) + strings.Repeat("6", 48)},
+	} {
+		results := ParseIDWithOptions(testCase.input, testCase.format, types.ParseOptions{})
+		if len(results) != 1 || results[0].ColorMap != testCase.want {
+			t.Fatalf("%s color map mismatch: %#v", testCase.format, results)
+		}
+	}
+}
+
 func TestGenerationMatchesAlignedParsers(t *testing.T) {
 	for _, format := range []string{"scru128", "nanoid"} {
 		t.Run(format, func(t *testing.T) {

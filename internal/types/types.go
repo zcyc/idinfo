@@ -29,6 +29,7 @@ type IDInfo struct {
 	Node3          *string           `json:"node3,omitempty"`
 	Hex            string            `json:"hex"`
 	Binary         []byte            `json:"-"`
+	ColorMap       string            `json:"-"`
 	Extra          map[string]string `json:"extra,omitempty"`
 	HighConfidence bool              `json:"-"`
 }
@@ -134,9 +135,7 @@ const (
 	FormatNanoID    IDFormat = "nanoid"
 	FormatUnixTime  IDFormat = "unix"
 	FormatHashHex   IDFormat = "hash"
-	FormatBase58    IDFormat = "base58"
 	FormatPushID    IDFormat = "pushid"
-	FormatBase32    IDFormat = "base32"
 	FormatShortUUID IDFormat = "shortuuid"
 	FormatSqids     IDFormat = "sqid"
 	FormatTypeID    IDFormat = "typeid"
