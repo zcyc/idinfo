@@ -201,6 +201,12 @@ func normalizeIDArgs(args []string) []string {
 			name = name[:equal]
 		}
 		if valueFlags[name] {
+			if !seenPositional && strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") && strings.ContainsRune(arg, '=') {
+				positional = append(positional, arg)
+				seenPositional = true
+				changed = true
+				continue
+			}
 			flags = append(flags, arg)
 			if !strings.ContainsRune(arg, '=') && index+1 < len(args) {
 				flags = append(flags, args[index+1])

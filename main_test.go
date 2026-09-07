@@ -56,8 +56,8 @@ func TestNormalizeIDArgs(t *testing.T) {
 		t.Fatalf("normalizeIDArgs() accepted an unsupported attached short value: %#v", got)
 	}
 
-	args = []string{"-f=pushid", "-OFrJ24CPTXLcIPPjvh3"}
-	wantEquals := []string{"-f=pushid", "--", "-OFrJ24CPTXLcIPPjvh3"}
+	args = []string{"-f=pushid", "aeby6ob5sso4zd"}
+	wantEquals := []string{"--", "-f=pushid", "aeby6ob5sso4zd"}
 	if got := normalizeIDArgs(args); !reflect.DeepEqual(got, wantEquals) {
 		t.Fatalf("normalizeIDArgs() mishandled an equals-form short value: %#v", got)
 	}
