@@ -1,6 +1,8 @@
 package parsers
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/zcyc/idinfo/internal/types"
@@ -78,6 +80,39 @@ func TestAlignedFormats(t *testing.T) {
 				t.Fatalf("expected %q, got %q", testCase.idType, results[0].IDType)
 			}
 		})
+	}
+}
+
+func TestCanonicalForceFormats(t *testing.T) {
+	for _, format := range CanonicalForceFormats() {
+		if !IsCanonicalForceFormat(format) {
+			t.Errorf("canonical format %q was not recognized", format)
+		}
+	}
+	for _, format := range []string{"UUID", "base58", "base32", "snowflake", "isbn10", "shortpuid", "objectid", "unixtime"} {
+		if IsCanonicalForceFormat(format) {
+			t.Errorf("non-canonical format %q was recognized", format)
+		}
+	}
+}
+
+func TestEpochOverflowMatchesUuinfo(t *testing.T) {
+	results := ParseIDWithOptions("01JCXSGZMZQQJ2M93WC0T8KT02", "ulid", types.ParseOptions{
+		Epoch:    18446744073709551,
+		HasEpoch: true,
+	})
+	if len(results) != 1 || results[0].DateTime != nil || results[0].Timestamp == nil {
+		t.Fatalf("unexpected overflow timestamp result: %#v", results)
+	}
+	if got := *results[0].Timestamp; got != "18446744073709552.000" {
+		t.Fatalf("timestamp = %q, want %q", got, "18446744073709552.000")
+	}
+	encoded, err := json.Marshal(results[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"datetime":"Invalid"`) {
+		t.Fatalf("JSON did not preserve invalid datetime: %s", encoded)
 	}
 }
 

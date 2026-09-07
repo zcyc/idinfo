@@ -3,7 +3,6 @@ package parsers
 import (
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/zcyc/idinfo/internal/types"
 )
@@ -14,6 +13,28 @@ var alignedFormats = []string{
 	"sqid", "hashid", "youtube", "stripe", "datadog", "snowflake", "unix", "hash", "ipfs", "breezeid", "puid", "shortpuid",
 	"ipv4", "ipv6", "mac", "isbn10", "tid", "duns", "asin", "nanoid", "cuid1", "cuid2", "h3", "imei", "gdocs", "slack",
 	"spotify", "swhid", "iban", "bitcoin", "ethereum", "commerce", "vin", "mist", "comb",
+}
+
+var canonicalForceFormats = []string{
+	"uuid", "shortuuid", "uuid-int", "uuid-b64", "uuid25", "ulid", "sandflake", "julid", "upid", "comb", "timeflake", "flake",
+	"scru128", "scru64", "mongodb", "ksuid", "xid", "cuid1", "cuid2", "nanoid", "tsid", "sqid", "hashid", "youtube", "stripe",
+	"datadog", "nuid", "typeid", "breezeid", "puid", "pushid", "tid", "threads", "duns", "asin", "snowid", "gdocs", "slack",
+	"spotify", "nano64", "orderlyid", "swhid", "iban", "commerce", "vin", "bitcoin", "ethereum", "sf-twitter", "sf-mastodon",
+	"sf-discord", "sf-instagram", "sf-linkedin", "sf-sony", "sf-spaceflake", "sf-frostflake", "sf-flakeid", "sf-simpleflake",
+	"mist", "unix", "unix-s", "unix-ms", "unix-us", "unix-ns", "hash", "ipfs", "ipv4", "ipv6", "mac", "imei", "isbn", "h3",
+}
+
+func CanonicalForceFormats() []string {
+	return append([]string(nil), canonicalForceFormats...)
+}
+
+func IsCanonicalForceFormat(name string) bool {
+	for _, format := range canonicalForceFormats {
+		if format == name {
+			return true
+		}
+	}
+	return false
 }
 
 func parseExisting(name, input string) (*types.IDInfo, error) {
@@ -59,7 +80,6 @@ func tryAligned(options types.ParseOptions, input string, names ...string) (*typ
 }
 
 func autoDetectAligned(input string, options types.ParseOptions) (*types.IDInfo, error) {
-	input = strings.TrimSpace(input)
 	if info, ok := tryAligned(options, input, "iban"); ok {
 		return info, nil
 	}
@@ -131,15 +151,13 @@ func autoDetectAligned(input string, options types.ParseOptions) (*types.IDInfo,
 }
 
 func ParseIDWithOptions(input, force string, options types.ParseOptions) []*types.IDInfo {
-	input = strings.TrimSpace(input)
 	if force != "" {
-		name := strings.ToLower(strings.TrimSpace(force))
-		if name == "puid" {
+		if force == "puid" {
 			if info, err := parsePUIDAny(input, options); err == nil {
 				return []*types.IDInfo{info}
 			}
 		}
-		if info, err := parseNameWithOptions(name, input, options); err == nil {
+		if info, err := parseNameWithOptions(force, input, options); err == nil {
 			return []*types.IDInfo{info}
 		}
 		return nil
@@ -152,7 +170,6 @@ func ParseIDWithOptions(input, force string, options types.ParseOptions) []*type
 }
 
 func ParseAllWithOptions(input string, options types.ParseOptions) []*types.IDInfo {
-	input = strings.TrimSpace(input)
 	var results []*types.IDInfo
 	for _, name := range alignedFormats {
 		info, err := parseNameWithOptions(name, input, options)
@@ -164,7 +181,6 @@ func ParseAllWithOptions(input string, options types.ParseOptions) []*types.IDIn
 }
 
 func ParseTimesWithOptions(input string, options types.ParseOptions) []*types.IDInfo {
-	input = strings.TrimSpace(input)
 	var results []*types.IDInfo
 	for _, name := range alignedFormats {
 		if info, err := parseNameWithOptions(name, input, options); err == nil && info.DateTime != nil {

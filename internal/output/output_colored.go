@@ -11,11 +11,12 @@ import (
 
 // Color definitions
 var (
-	headerColor = color.New(color.FgCyan, color.Bold)
-	labelColor  = color.New(color.FgWhite, color.Bold)
-	valueColor  = color.New(color.FgGreen)
-	binaryColor = color.New(color.FgYellow)
-	borderColor = color.New(color.FgBlue)
+	versionColor   = color.New(color.FgYellow)
+	entropyColor   = color.New(color.FgGreen)
+	timestampColor = color.New(color.FgCyan)
+	node1Color     = color.New(color.FgMagenta)
+	node2Color     = color.New(color.FgRed)
+	sequenceColor  = color.New(color.FgBlue)
 )
 
 // ShowCardColored displays the ID information in a colorful card format
@@ -27,18 +28,16 @@ func ShowCardColored(info *types.IDInfo) {
 	timestamp := cardTimestamp(info)
 	rSpace := maxInt(43, len([]rune(timestamp)))
 	border := func(char, left, middle, right string) {
-		borderColor.Print(left)
-		borderColor.Print(strings.Repeat(char, 10))
-		borderColor.Print(middle)
-		borderColor.Print(strings.Repeat(char, rSpace))
-		borderColor.Println(right)
+		fmt.Print(left)
+		fmt.Print(strings.Repeat(char, 10))
+		fmt.Print(middle)
+		fmt.Print(strings.Repeat(char, rSpace))
+		fmt.Println(right)
 	}
 	row := func(label, value string) {
-		borderColor.Print("┃ ")
-		labelColor.Printf("%-9s ", label)
-		borderColor.Print("│ ")
-		valueColor.Printf("%-*s ", rSpace, value)
-		borderColor.Println("┃")
+		fmt.Print("┃ ")
+		printColoredLabel(label)
+		fmt.Printf(" │ %-*s ┃\n", rSpace, value)
 	}
 	border("━", "┏━", "┯", "━━┓")
 	row("ID Type", info.IDType)
@@ -79,11 +78,26 @@ func ShowCardColored(info *types.IDInfo) {
 	row("Sequence", pointerInt64Value(info.Sequence, "-"))
 	border("─", "┠─", "┼", "──┨")
 	for _, line := range cardBinaryLines(info.Hex) {
-		borderColor.Print("┃ ")
-		color.New(color.FgCyan).Printf("%-9s ", line.hex)
-		borderColor.Print("│ ")
-		binaryColor.Printf("%-*s ", rSpace, line.binary)
-		borderColor.Println("┃")
+		fmt.Printf("┃ %-9s │ %-*s ┃\n", line.hex, rSpace, line.binary)
 	}
 	border("━", "┗━", "┷", "━━┛")
+}
+
+func printColoredLabel(label string) {
+	switch label {
+	case "Version":
+		versionColor.Printf("%-9s", label)
+	case "Entropy":
+		entropyColor.Printf("%-9s", label)
+	case "Timestamp", "Relative":
+		timestampColor.Printf("%-9s", label)
+	case "Node 1":
+		node1Color.Printf("%-9s", label)
+	case "Node 2":
+		node2Color.Printf("%-9s", label)
+	case "Sequence":
+		sequenceColor.Printf("%-9s", label)
+	default:
+		fmt.Printf("%-9s", label)
+	}
 }

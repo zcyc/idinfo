@@ -40,3 +40,26 @@ func TestNormalizeIDArgs(t *testing.T) {
 		t.Fatalf("normalizeIDArgs() mishandled an equals-form short value: %#v", got)
 	}
 }
+
+func TestRelativeDuration(t *testing.T) {
+	tests := []struct {
+		seconds int64
+		want    string
+	}{
+		{0, "in a few seconds"},
+		{44, "in a few seconds"},
+		{45, "in a minute"},
+		{90, "in 2 minutes"},
+		{45 * 60, "in an hour"},
+		{22 * 60 * 60, "in a day"},
+		{26 * 24 * 60 * 60, "in a month"},
+		{-44, "a few seconds ago"},
+		{-90, "2 minutes ago"},
+		{-24 * 60 * 60, "a day ago"},
+	}
+	for _, test := range tests {
+		if got := relativeDuration(test.seconds); got != test.want {
+			t.Errorf("relativeDuration(%d) = %q, want %q", test.seconds, got, test.want)
+		}
+	}
+}

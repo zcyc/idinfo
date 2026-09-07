@@ -115,7 +115,7 @@ func cardTimestamp(info *types.IDInfo) string {
 		timestamp = timestamp[:end]
 	}
 	if info.DateTime == nil {
-		return timestamp + " (-)"
+		return timestamp + " (Invalid)"
 	}
 	return timestamp + " (" + cardDateTime(*info.DateTime) + ")"
 }
@@ -208,7 +208,7 @@ func ShowBinary(info *types.IDInfo) {
 // ShowEverything displays all successful parses
 func ShowEverything(results []*types.IDInfo) {
 	for _, info := range results {
-		ShowCard(info)
+		ShowCardColored(info)
 	}
 }
 

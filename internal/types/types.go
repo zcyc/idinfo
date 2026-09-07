@@ -64,6 +64,9 @@ func (info IDInfo) MarshalJSON() ([]byte, error) {
 			value = "+" + value
 		}
 		datetime = &value
+	} else if info.Timestamp != nil {
+		value := "Invalid"
+		datetime = &value
 	}
 	if info.Hex != "" {
 		hexValue = &info.Hex

@@ -376,19 +376,55 @@ func parseBigDecimal(value string, bits int) (*big.Int, error) {
 	return number, nil
 }
 
-func epochMillis(options types.ParseOptions, defaultMillis int64) int64 {
+func epochMillis(options types.ParseOptions, defaultMillis int64) uint64 {
 	if options.HasEpoch {
-		const maxInt64 = uint64(^uint64(0) >> 1)
-		if options.Epoch > maxInt64/1000 {
-			return int64(maxInt64)
+		const maxUint64 = ^uint64(0)
+		if options.Epoch > maxUint64/1000 {
+			return maxUint64
 		}
-		return int64(options.Epoch * 1000)
+		return options.Epoch * 1000
 	}
-	return defaultMillis
+	if defaultMillis < 0 {
+		return 0
+	}
+	return uint64(defaultMillis)
 }
 
-func timestampInfo(rawMillis, epoch int64) (*string, *time.Time) {
-	millis := rawMillis + epoch
+func timestampInfo(rawMillis int64, epoch uint64) (*string, *time.Time) {
+	if rawMillis < 0 {
+		if epoch > uint64(^uint64(0)>>1) {
+			timestamp := fmt.Sprintf("%.3f", float64(epoch)/1000)
+			return &timestamp, nil
+		}
+		return timestampInfoSigned(rawMillis, int64(epoch))
+	}
+
+	const maxUint64 = ^uint64(0)
+	millis := uint64(rawMillis)
+	if maxUint64-millis < epoch {
+		millis = maxUint64
+	} else {
+		millis += epoch
+	}
+	seconds := millis / 1000
+	remainingMillis := millis % 1000
+	timestamp := fmt.Sprintf("%.3f", float64(millis)/1000)
+	if seconds > uint64(^uint64(0)>>1) {
+		return &timestamp, nil
+	}
+	datetime := time.Unix(int64(seconds), int64(remainingMillis)*int64(time.Millisecond)).UTC()
+	if datetime.Year() < -262144 || datetime.Year() > 262143 {
+		return &timestamp, nil
+	}
+	return &timestamp, &datetime
+}
+
+func timestampInfoSigned(millis, epoch int64) (*string, *time.Time) {
+	if millis > 0 && epoch > int64(^uint64(0)>>1)-millis {
+		timestamp := fmt.Sprintf("%.3f", (float64(millis)+float64(epoch))/1000)
+		return &timestamp, nil
+	}
+	millis += epoch
 	seconds := millis / 1000
 	nanos := (millis % 1000) * int64(time.Millisecond)
 	if millis < 0 && nanos != 0 {

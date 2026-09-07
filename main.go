@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -45,7 +46,7 @@ func main() {
 		return
 	}
 	if *version {
-		fmt.Println("idinfo 0.1.0")
+		fmt.Println("idinfo 0.7.5")
 		return
 	}
 
@@ -54,6 +55,7 @@ func main() {
 		handleGeneration(*generate)
 		return
 	}
+	validateOptions(*forceFormat, *outputFormat)
 
 	args := flag.Args()
 	if len(args) == 0 {
@@ -69,7 +71,7 @@ func main() {
 		// Read from stdin
 		scanner := bufio.NewScanner(os.Stdin)
 		if scanner.Scan() {
-			input = strings.TrimSpace(scanner.Text())
+			input = scanner.Text()
 		}
 		if err := scanner.Err(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error reading from stdin: %v\n", err)
@@ -78,12 +80,6 @@ func main() {
 		}
 	} else {
 		input = args[0]
-	}
-
-	if input == "" {
-		fmt.Fprintf(os.Stderr, "Error: Empty input provided\n")
-		fmt.Fprintf(os.Stderr, "Please provide a valid ID to parse.\n")
-		os.Exit(1)
 	}
 
 	options := types.ParseOptions{Alphabet: *alphabet, Salt: *salt}
@@ -158,14 +154,15 @@ func main() {
 }
 
 func setRelativeTime(info *types.IDInfo) {
-	if info.DateTime == nil {
+	if info.Timestamp == nil {
 		return
 	}
-	diff := time.Since(*info.DateTime)
-	value := "in " + relativeDuration(-diff)
-	if diff >= 0 {
-		value = relativeDuration(diff) + " ago"
+	timestamp, err := strconv.ParseFloat(*info.Timestamp, 64)
+	if err != nil {
+		return
 	}
+	diff := int64(timestamp) - time.Now().UTC().Unix()
+	value := relativeDuration(diff)
 	info.Relative = &value
 }
 
@@ -325,14 +322,17 @@ USAGE:
 OPTIONS:
     -f, --force <FORMAT>
                     Force parsing as specific format
-                    Available formats: uuid, uuid-b64, uuid25, shortuuid, uuid-int,
-                    ulid, julid, upid, sandflake, timeflake, flake, mongodb,
-                    ksuid, xid, scru128, scru64, tsid, nuid, typeid, pushid,
-                    orderlyid, threads, snowid, nano64, sqid, hashid, youtube,
-                    stripe, datadog, breezeid, puid, tid, duns, asin, gdocs,
-                    slack, spotify, swhid, iban, commerce, vin, bitcoin,
-                    ethereum, ipfs, ipv4, ipv6, mac, imei, isbn, h3, mist, comb,
-                    snowflake variants, unix units, hashes, base58, base32.
+                    Available formats: uuid, shortuuid, uuid-int, uuid-b64, uuid25,
+                    ulid, sandflake, julid, upid, comb, timeflake, flake,
+                    scru128, scru64, mongodb, ksuid, xid, cuid1, cuid2, nanoid,
+                    tsid, sqid, hashid, youtube, stripe, datadog, nuid, typeid,
+                    breezeid, puid, pushid, tid, threads, duns, asin, snowid,
+                    gdocs, slack, spotify, nano64, orderlyid, swhid, iban,
+                    commerce, vin, bitcoin, ethereum, sf-twitter, sf-mastodon,
+                    sf-discord, sf-instagram, sf-linkedin, sf-sony, sf-spaceflake,
+                    sf-frostflake, sf-flakeid, sf-simpleflake, mist, unix, unix-s,
+                    unix-ms, unix-us, unix-ns, hash, ipfs, ipv4, ipv6, mac, imei,
+                    isbn, h3.
     -o, --output <OUTPUT>
                     Output format (card, short, json, binary) [default: card]
     -e, --everything
@@ -347,8 +347,8 @@ OPTIONS:
     -r, --relative  Show relative time if timestamp is available
     --salt <SALT>   Custom salt for Hashids
     --epoch <SEC>   Override epoch (seconds since 1970-01-01 UTC)
-    --version       Show version
-    --help          Show this help message
+    -V, --version   Show version
+    -h, --help      Show this help message
 
 EXAMPLES:
     Parse ID:
@@ -379,17 +379,63 @@ SUPPORTED ID FORMATS:
 `)
 }
 
-func relativeDuration(duration time.Duration) string {
+func relativeDuration(seconds int64) string {
+	beforeCurrent := seconds < 0
+	var duration uint64
+	if beforeCurrent {
+		duration = uint64(-(seconds + 1)) + 1
+	} else {
+		duration = uint64(seconds)
+	}
+
+	const (
+		minute = 60
+		hour   = 60 * minute
+		day    = 24 * hour
+		month  = 30 * day
+	)
+	ceil := func(value, unit uint64) uint64 { return (value + unit - 1) / unit }
+
+	var value string
 	switch {
-	case duration < time.Minute:
-		return "less than a minute"
-	case duration < time.Hour:
-		return fmt.Sprintf("%d minutes", int(duration/time.Minute))
-	case duration < 24*time.Hour:
-		return fmt.Sprintf("%d hours", int(duration/time.Hour))
-	case duration < 365*24*time.Hour:
-		return fmt.Sprintf("%d days", int(duration/(24*time.Hour)))
+	case duration <= 44:
+		value = "a few seconds"
+	case duration <= 89:
+		value = "a minute"
+	case duration <= 44*minute:
+		value = fmt.Sprintf("%d minutes", ceil(duration, minute))
+	case duration <= 89*minute:
+		value = "an hour"
+	case duration <= 21*hour:
+		value = fmt.Sprintf("%d hours", ceil(duration, hour))
+	case duration <= 35*hour:
+		value = "a day"
+	case duration <= 25*day:
+		value = fmt.Sprintf("%d days", ceil(duration, day))
+	case duration <= 45*day:
+		value = "a month"
+	case duration <= 10*month:
+		value = fmt.Sprintf("%.0f months", float32(duration)/float32(month))
+	case duration <= 17*month:
+		value = "a year"
 	default:
-		return fmt.Sprintf("%d years", int(duration/(365*24*time.Hour)))
+		value = fmt.Sprintf("%.0f years", float32(duration)/float32(12*month))
+	}
+	if beforeCurrent {
+		return value + " ago"
+	}
+	return "in " + value
+}
+
+func validateOptions(force, output string) {
+	if force != "" && !parsers.IsCanonicalForceFormat(force) {
+		fmt.Fprintf(os.Stderr, "error: invalid value %q for '--force <FORCE>'\n", force)
+		fmt.Fprintf(os.Stderr, "  [possible values: %s]\n", strings.Join(parsers.CanonicalForceFormats(), ", "))
+		os.Exit(2)
+	}
+	if output != "card" && output != "short" && output != "json" && output != "binary" {
+		fmt.Fprintf(os.Stderr, "error: invalid value %q for '--output <OUTPUT>'\n", output)
+		fmt.Fprintln(os.Stderr, "  [possible values: card, short, json, binary]")
+		os.Exit(2)
 	}
 }

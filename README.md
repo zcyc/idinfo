@@ -1,251 +1,204 @@
-# idinfo: ID Information Tool
+# idinfo
 
-[![Go Version](https://img.shields.io/badge/Go-1.20+-blue.svg)](https://golang.org/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen.svg)](#)
+`idinfo` 是一个用于识别和分析各种 ID 的命令行工具，支持自动识别、强制指定格式、时间比较、JSON/二进制输出，以及可选的 ID 生成。
 
-A Go-based command-line tool for debugging and analyzing unique identifiers. This tool can parse, analyze, and generate various types of unique identifiers with detailed information extraction.
+核心解析命令与 [uuinfo](https://github.com/Racum/uuinfo) 对齐。默认输出信息卡片，也可以输出适合脚本处理的 JSON 或原始二进制数据。
 
-## Quick Start
+## 安装
 
-```bash
-# Install
-go install github.com/zcyc/idinfo@latest
-
-# Generate a UUID
-idinfo -g uuid
-
-# Analyze the generated UUID
-idinfo $(idinfo -g uuid)
-
-# Try different formats
-idinfo -g snowflake
-idinfo -g nanoid
-idinfo -g ulid
-```
-
-## Features
-
-- **Multiple ID Format Support**: UUID (v1-v8), ULID, MongoDB ObjectId, KSUID, Xid, NanoID, NUID, Snowflake variants, Unix timestamps, hex-encoded hashes, Base58, Firebase PushID, Base32, ShortUUID, Sqids, and TypeID
-- **Auto-Detection**: Automatically detects ID format using heuristics
-- **Force Format**: Override auto-detection to parse as specific format
-- **Multiple Output Formats**: Card-style (default), short, JSON, and binary output
-- **Comprehensive Analysis**: Extracts timestamps, entropy, node information, sequences, and format-specific details
-- **Pipeline Support**: Read from stdin for integration with other tools
-- **Comparison Mode**: Compare timestamps from different format interpretations
-- **Everything Mode**: Show all possible format interpretations
-
-## Installation
-
-### Using go install
+需要 Go 1.24 或更高版本。
 
 ```bash
 go install github.com/zcyc/idinfo@latest
 ```
 
-### Build from Source
+也可以从源码构建：
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/zcyc/idinfo.git
 cd idinfo
 go build -o idinfo .
 ```
 
-## Usage
-
-### Basic Usage
+## 快速开始
 
 ```bash
-# Analyze a UUID (using installed binary)
+# 自动识别
 idinfo 550e8400-e29b-41d4-a716-446655440000
 
-# Analyze a MongoDB ObjectId
-idinfo 507f1f77bcf86cd799439011
-
-# Analyze a ULID
-idinfo 01ARZ3NDEKTSV4RRFFQ69G5FAV
-
-# If you built from source, use ./idinfo instead:
-./idinfo 550e8400-e29b-41d4-a716-446655440000
-```
-
-### Force Specific Format
-
-```bash
-# Parse a number as Twitter Snowflake
+# 强制按指定格式解析
+idinfo -f uuid 550e8400-e29b-41d4-a716-446655440000
 idinfo -f sf-twitter 1777150623882019211
 
-# Parse as UUID even if it could be something else
-idinfo -f uuid 550e8400-e29b-41d4-a716-446655440000
+# 输出 JSON
+idinfo -o json 507f1f77bcf86cd799439011
+
+# 从标准输入读取一行
+echo 550e8400-e29b-41d4-a716-446655440000 | idinfo -
 ```
 
-### Different Output Formats
+## 命令格式
 
-```bash
-# Short format
-idinfo -o short 507f1f77bcf86cd799439011
-
-# JSON format
-idinfo -o json 550e8400-e29b-41d4-a716-446655440000
-
-# Binary output (useful for further processing)
-idinfo -o binary 550e8400-e29b-41d4-a716-446655440000 | xxd
+```text
+idinfo [OPTIONS] <ID>
+idinfo [OPTIONS] -
+idinfo -g <FORMAT>
 ```
 
-### Advanced Features
+### 选项
 
-```bash
-# Show all possible format interpretations
-idinfo -e 1777150623882019211
+| 选项 | 说明 |
+| --- | --- |
+| `-f, --force <FORMAT>` | 强制使用指定格式解析 |
+| `-o, --output <FORMAT>` | 输出格式：`card`、`short`、`json`、`binary` |
+| `-e, --everything` | 显示所有成功的格式解析结果；此模式始终输出卡片 |
+| `-c, --compare` | 比较所有时间相关解析结果 |
+| `-a, --alphabet <ALPHABET>` | 为 Sqid 或 Nano ID 指定自定义字母表 |
+| `-r, --relative` | 在卡片中显示相对时间 |
+| `--salt <SALT>` | 为 Hashid 指定自定义 salt |
+| `--epoch <SECONDS>` | 为基于时间的 ID 指定 epoch 偏移，单位为秒 |
+| `-g, --generate <FORMAT>` | 生成一个 ID；这是 idinfo 的扩展功能 |
+| `-V, --version` | 显示版本 |
+| `-h, --help` | 显示帮助 |
 
-# Compare timestamps from different interpretations
-idinfo --compare 1777150623882019211
+卡片输出在终端中会自动使用 ANSI 颜色；重定向到文件或管道时通常会自动关闭颜色。
 
-# Generate new IDs
-idinfo -g uuid
-idinfo -g snowflake
-idinfo -g nanoid
+## 支持的格式
 
-# Pipeline usage
-echo "550e8400-e29b-41d4-a716-446655440000" | idinfo -
+### uuinfo 对齐的标准格式
+
+以下名称是强制解析时使用的 canonical 名称：
+
+```text
+uuid shortuuid uuid-int uuid-b64 uuid25
+ulid sandflake julid upid comb timeflake flake
+scru128 scru64 mongodb ksuid xid cuid1 cuid2
+nanoid tsid sqid hashid youtube stripe datadog nuid typeid
+breezeid puid pushid tid threads duns asin snowid
+gdocs slack spotify nano64 orderlyid swhid iban commerce vin
+bitcoin ethereum
+sf-twitter sf-mastodon sf-discord sf-instagram sf-linkedin
+sf-sony sf-spaceflake sf-frostflake sf-flakeid sf-simpleflake
+mist unix unix-s unix-ms unix-us unix-ns hash ipfs
+ipv4 ipv6 mac imei isbn h3
 ```
 
-## Supported ID Formats
+支持的 ID 类型包括：
 
-### Core Formats
-- **UUID (RFC-9562)**: All versions (1-8), including Nil and Max UUIDs
-- **ULID**: Universally Unique Lexicographically Sortable Identifier
-- **MongoDB ObjectId**: 96-bit ObjectId with timestamp, machine, process, and counter
-- **KSUID**: K-Sortable Unique Identifier with timestamp and payload
-- **Xid**: Globally unique sortable id with timestamp, machine, process, and counter
+- UUID 1–8、Nil UUID、Max UUID、NCS UUID 和 Microsoft GUID
+- UUID 的 ShortUUID、Base64、Uuid25 和整数表示
+- ULID、Julid、UPID、Sandflake、SCRU128、SCRU64、Timeflake、Flake、COMB
+- MongoDB ObjectId、KSUID、Xid、CUID1、CUID2、Nano ID、Sqid、Hashid、TypeID
+- Twitter、Discord、Instagram、LinkedIn、Sony、Mastodon 等 Snowflake 变体
+- TSID、TID、Threads、SnowID、NUID、PUID、PushID、OrderlyID、Nano64
+- DUNS、ASIN、Google Docs、Slack、Spotify、SWHID、IBAN、ISBN、VIN 和商业条码
+- Bitcoin、Ethereum、IPFS、IPv4、IPv6、MAC、IMEI、H3 和十六进制 Hash
 
-### Additional Formats
-- **NanoID**: URL-safe unique ID generator
-- **NUID**: NATS Unique Identifier - high-performance 22-character base62 IDs
-- **Snowflake Variants**: Twitter, Discord, Instagram formats
-- **Unix Timestamps**: Seconds, milliseconds, microseconds, nanoseconds
-- **Hex-encoded Hashes**: MD5, SHA-1, SHA-256, SHA-384, SHA-512
+### idinfo 扩展格式
 
-### Extended Formats
-- **Base58**: Bitcoin-style base58 encoded IDs (no confusing characters)
-- **Firebase PushID**: Firebase real-time database push IDs
-- **Base32**: RFC 4648 base32 encoded identifiers
-- **Hashids**: Reversible obfuscated numeric IDs
+`base58`、`base32`、`snowflake`、`isbn10` 和 `shortpuid` 是 idinfo 的额外解析名称，不属于 uuinfo 的 canonical `--force` 选项；其中 `base58` 和 `base32` 只能通过强制格式使用。
 
-### Platform & Service IDs
-- **ShortUUID**: 22-character UUID representations
+## 输出示例
 
-- **Sqids**: Modern Hashids successor with anti-profanity
-- **TypeID**: Type-prefixed ULID format (type_id)
+### Card（默认）
 
-## Output Examples
-
-### Card Format (Default)
-```
+```text
 ┏━━━━━━━━━━━┯━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ ID Type   │ UUID (RFC-9562)                             ┃
+┃ ID Type   │ UUID (RFC-4122)                             ┃
 ┃ Version   │ 4 (random)                                  ┃
 ┠───────────┼─────────────────────────────────────────────┨
 ┃ String    │ 550e8400-e29b-41d4-a716-446655440000        ┃
 ┃ Integer   │ 113059749145936325402354257176981405696     ┃
-┃ Base64    │ VQ6EAOKbQdSnFkRmVUQAAA==                    ┃
 ┠───────────┼─────────────────────────────────────────────┨
-┃ Size      │ 128 bits                                    ┃
+┃ Size      │ 128 bits (from hex)                         ┃
 ┃ Entropy   │ 122 bits                                    ┃
+┃ Timestamp │ -                                           ┃
 ┃ Node 1    │ -                                           ┃
 ┃ Node 2    │ -                                           ┃
 ┃ Sequence  │ -                                           ┃
 ┠───────────┼─────────────────────────────────────────────┨
-┃ 550e 8400 │ 0101 0101 0000 1110 1000 0100 0000 0000     ┃
-┃ e29b 41d4 │ 1110 0010 1001 1011 0100 0001 1101 0100     ┃
-┃ a716 4466 │ 1010 0111 0001 0110 0100 0100 0110 0110     ┃
-┃ 5544 0000 │ 0101 0101 0100 0100 0000 0000 0000 0000     ┃
+┃ 550e 8400 │ 0101 0101  0000 1110   1000 0100  0000 0000 ┃
+┃ e29b 41d4 │ 1110 0010  1001 1011   0100 0001  1101 0100 ┃
+┃ a716 4466 │ 1010 0111  0001 0110   0100 0100  0110 0110 ┃
+┃ 5544 0000 │ 0101 0101  0100 0100   0000 0000  0000 0000 ┃
 ┗━━━━━━━━━━━┷━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 ```
 
-### JSON Format
+### JSON
+
 ```json
 {
-  "id_type": "UUID (RFC-9562)",
+  "id_type": "UUID (RFC-4122)",
   "version": "4 (random)",
   "standard": "550e8400-e29b-41d4-a716-446655440000",
-  "integer": "113059749145936325402354257176981405696",
-  "base64": "VQ6EAOKbQdSnFkRmVUQAAA==",
+  "integer": 113059749145936325402354257176981405696,
+  "uuid_wrap": null,
+  "parsed": "from hex",
   "size": 128,
   "entropy": 122,
-  "hex": "550e8400e29b41d4a716446655440000",
-  "extra": {
-    "variant": "RFC 4122"
-  }
+  "datetime": null,
+  "timestamp": null,
+  "relative_time": null,
+  "sequence": null,
+  "node1": null,
+  "node2": null,
+  "node3": null,
+  "hex": "550e8400e29b41d4a716446655440000"
 }
 ```
 
-### Short Format
-```
-ID Type: UUID (RFC-9562), version: 4 (random).
-```
+### Short 和 Binary
 
-## Command Line Options
-
-### Parsing Options
-- `-f <FORMAT>`: Force parsing as specific format
-- `-o <OUTPUT>`: Output format (card, short, json, binary)
-- `-e`: Show all possible format interpretations
-- `--compare`: Compare timestamps from different format interpretations
-
-### Generation Options
-- `-g <FORMAT>`: Generate new ID of specified format
-
-### General Options
-- `--help`: Show help message
-
-### Available Force Formats
-- `uuid`, `shortuuid`, `uuid-int`, `uuid-b64`, `uuid25`
-- `ulid`, `sandflake`, `julid`, `upid`, `comb`, `timeflake`, `flake`
-- `scru128`, `scru64`, `mongodb`, `ksuid`, `xid`, `cuid1`, `cuid2`, `nanoid`
-- `tsid`, `sqid`, `hashid`, `youtube`, `stripe`, `datadog`, `nuid`, `typeid`
-- `breezeid`, `puid`, `pushid`, `tid`, `threads`, `duns`, `asin`, `snowid`
-- `gdocs`, `slack`, `spotify`, `nano64`, `orderlyid`, `swhid`, `iban`
-- `commerce`, `vin`, `bitcoin`, `ethereum`
-- `sf-twitter`, `sf-mastodon`, `sf-discord`, `sf-instagram`, `sf-linkedin`, `sf-sony`, `sf-spaceflake`, `sf-frostflake`, `sf-flakeid`, `sf-simpleflake`
-- `mist`, `unix`, `unix-s`, `unix-ms`, `unix-us`, `unix-ns`, `hash`, `ipfs`
-- `ipv4`, `ipv6`, `mac`, `imei`, `isbn`, `h3`
-
-## Architecture
-
-The tool follows a modular architecture:
-
-```
-├── main.go                 # CLI entry point
-├── internal/
-│   ├── types/             # Common types and interfaces
-│   ├── parsers/           # ID parsers for each format
-│   │   ├── registry.go    # Parser registration and management
-│   │   ├── uuid.go        # UUID parser
-│   │   ├── ulid.go        # ULID parser
-│   │   └── ...            # Other format parsers
-│   └── output/            # Output formatters
-│       └── output.go      # Card, short, JSON, binary formatters
+```bash
+idinfo -o short 550e8400-e29b-41d4-a716-446655440000
+idinfo -o binary 550e8400-e29b-41d4-a716-446655440000 | xxd
 ```
 
-Each parser implements the `IDParser` interface:
-```go
-type IDParser interface {
-    Name() string
-    CanParse(input string) bool
-    Parse(input string) (*IDInfo, error)
-    Generate() (string, error)  // New: ID generation capability
-}
+## 常用场景
+
+```bash
+# 查看同一个数字可能对应的所有高置信度格式
+idinfo -e 1777150623882019211
+
+# 比较不同 Snowflake 变体的时间
+idinfo --compare 1777150623882019211
+
+# 显示相对时间
+idinfo -r 01JCXSGZMZQQJ2M93WC0T8KT02
+
+# 使用自定义 Hashid salt
+idinfo -f hashid --salt 'my secret' 80JTEquWr
 ```
 
+## 生成 ID
 
+生成是 idinfo 的额外能力，uuinfo 本身不提供 `-g`。UUID 支持以下版本：
 
+```bash
+idinfo -g uuid       # UUID v4
+idinfo -g uuid:v1
+idinfo -g uuid:v3
+idinfo -g uuid:v4
+idinfo -g uuid:v5
+idinfo -g uuid:v6
+idinfo -g uuid:v7
+```
+
+其他格式只有在实现了生成器时才能使用 `-g`；不支持生成的格式会返回错误。UUID v8 当前可以解析，但不能通过 `-g` 生成。
+
+## 开发
+
+```bash
+go test ./...
+go test -race ./...
+go vet ./...
+```
 
 ## License
 
-This project is licensed under the MIT License.
+本项目使用 MIT License。
 
-## Acknowledgments
+## 致谢
 
-- Inspired by [uuinfo](https://github.com/Racum/uuinfo)
-- Thanks to the Go community for the excellent ID generation libraries
+- 设计和格式参考 [uuinfo](https://github.com/Racum/uuinfo)
+- 感谢 Go 社区提供的 ID 解析和生成库
