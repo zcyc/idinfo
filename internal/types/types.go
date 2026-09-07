@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 )
 
@@ -51,7 +52,17 @@ func (info IDInfo) MarshalJSON() ([]byte, error) {
 		parsed = &info.Parsed
 	}
 	if info.DateTime != nil {
-		value := info.DateTime.UTC().Format("2006-01-02T15:04:05.000Z07:00")
+		layout := "2006-01-02T15:04:05.000Z07:00"
+		if info.Timestamp != nil {
+			if dot := strings.LastIndexByte(*info.Timestamp, '.'); dot >= 0 && len(*info.Timestamp)-dot-1 == 9 {
+				layout = "2006-01-02T15:04:05.000000000Z07:00"
+			}
+		}
+		dateTime := info.DateTime.UTC()
+		value := dateTime.Format(layout)
+		if dateTime.Year() >= 10000 {
+			value = "+" + value
+		}
 		datetime = &value
 	}
 	if info.Hex != "" {

@@ -16,6 +16,7 @@ func TestAlignedFormats(t *testing.T) {
 		{"uuid-b64", "UHKjBazX_UG8dEAJaikK1g", "Unpadded Base64 of UUID (RFC-4122)"},
 		{"uuid25", "dpoadk8izg9y4tte7vy1xt94o", "Uuid25 of UUID (RFC-4122)"},
 		{"shortuuid", "32CQvwbvpbnkmkhhguznVH", "ShortUUID of UUID (RFC-4122)"},
+		{"shortuuid", "XBCdxzsCR2FEFeSwhnjCo", "ShortUUID of Microsoft GUID"},
 		{"uuid-int", "2093703425379131962944436515747969848", "Integer of UUID (RFC-9562)"},
 		{"ulid", "01JCXSGZMZQQJ2M93WC0T8KT02", "ULID"},
 		{"julid", "01K3ESSGBY0002QCB9YXT6Q6MN", "Julid"},
@@ -117,14 +118,77 @@ func TestAlignedMetadataAndOptions(t *testing.T) {
 		t.Fatalf("custom-salt Hashid was not decoded")
 	}
 
+	sqid := ParseIDWithOptions("01JCXSGZMZQQJ2M93WC0T8KT02", "sqid", types.ParseOptions{})
+	if len(sqid) != 1 || sqid[0].Node1 == nil || *sqid[0].Node1 != "336192318" || sqid[0].HighConfidence {
+		t.Fatalf("unexpected checked Sqid decode: %#v", sqid)
+	}
+
+	hashid := ParseIDWithOptions("gocwRvLhDf8", "hashid", types.ParseOptions{})
+	if len(hashid) != 1 || hashid[0].Node1 == nil || *hashid[0].Node1 != "30, 665257, 29, 31" {
+		t.Fatalf("unexpected checked Hashid decode: %#v", hashid)
+	}
+	if got := ParseIDWithOptions("01JCXSGZMZQQJ2M93WC0T8KT02", "hashid", types.ParseOptions{}); len(got) != 0 {
+		t.Fatalf("overflowing Hashid should be rejected: %#v", got)
+	}
+
+	flakeID := ParseIDWithOptions("1000000000000000000", "sf-flakeid", types.ParseOptions{})[0]
+	if flakeID.Timestamp == nil || *flakeID.Timestamp != "238418579.101" {
+		t.Fatalf("unexpected Flake ID timestamp: %#v", flakeID.Timestamp)
+	}
+
+	sandflake := ParseIDWithOptions("05E4ECYW2GZ66B8AFZZZZMKFPR", "sandflake", types.ParseOptions{})[0]
+	if sandflake.Standard != "05E4ECYW2GZ66B8AFZZZZMKFPR" || sandflake.Timestamp == nil || *sandflake.Timestamp != "1495843200.020" {
+		t.Fatalf("unexpected Sandflake metadata: %#v", sandflake)
+	}
+
+	zeroResults := ParseAllWithOptions("0", types.ParseOptions{})
+	if len(zeroResults) != 2 || zeroResults[0].IDType != "Integer of Nil UUID (all zeros)" {
+		t.Fatalf("unexpected all-format result for zero: %#v", zeroResults)
+	}
+
 	auto := ParseIDWithOptions("01K3ESSGBY0002QCB9YXT6Q6MN", "", types.ParseOptions{})
 	if len(auto) != 1 || auto[0].IDType != "Julid" {
 		t.Fatalf("expected auto-detected Julid, got %#v", auto)
 	}
 
+	for input, want := range map[string]string{
+		"HamVxsto6jDM":           "SCRU64",
+		"aeby6ob5sso4":           "SCRU64",
+		"EQyuCsA4ysv7ezXReOrk4i": "NUID",
+		"JERHwh5PXjL":            "SnowID",
+		"DEr_fXvuw6D":            "Thread ID (Meta Threads)",
+		"15-048-3782":            "DUNS Number",
+	} {
+		results := ParseIDWithOptions(input, "", types.ParseOptions{})
+		if len(results) != 1 || results[0].IDType != want {
+			t.Fatalf("auto-detected %q as %#v, want %q", input, results, want)
+		}
+	}
+
+	for _, input := range []string{"0-42100-00526-4"} {
+		for _, info := range ParseAllWithOptions(input, types.ParseOptions{}) {
+			if info.IDType == "MAC Address" {
+				t.Fatalf("misclassified barcode as MAC address: %#v", info)
+			}
+		}
+	}
+
 	isbn := ParseIDWithOptions("9780553382570", "isbn", types.ParseOptions{})[0]
 	if isbn.Standard != "978-0-553-38257-0" || *isbn.Node2 != "553 (Publisher ID)" || *isbn.Sequence != 38257 {
 		t.Fatalf("unexpected ISBN metadata: %#v", isbn)
+	}
+	for input, want := range map[string]string{
+		"9780131103627": "978-0-13-110362-7",
+		"9780306406157": "978-0-306-40615-7",
+		"9783161484100": "978-3-16-148410-0",
+		"9787111213826": "978-7-111-21382-6",
+		"9787505715660": "978-7-5057-1566-0",
+		"0-9752298-0-X": "0-9752298-0-X",
+	} {
+		results := ParseIDWithOptions(input, "isbn", types.ParseOptions{})
+		if len(results) != 1 || results[0].Standard != want {
+			t.Fatalf("unexpected ISBN hyphenation for %q: %#v", input, results)
+		}
 	}
 }
 
@@ -153,6 +217,7 @@ func TestAlignedForceFormats(t *testing.T) {
 		{"unix-us", "1734971723000000", "Unix timestamp", "As microseconds"},
 		{"unix-ns", "1734971723000000000", "Unix timestamp", "As nanoseconds"},
 		{"isbn", "0-553-38257-8", "ISBN-10", ""},
+		{"hashid", "gocwRvLhDf8", "Hashid", "No salt"},
 		{"commerce", "0-42100-00526-4", "Commerce Barcode", "UPC-A (GTIN-12)"},
 		{"commerce", "9638-5074", "Commerce Barcode", "EAN-8 (GTIN-8)"},
 		{"commerce", "1-06-14141-000415", "Commerce Barcode", "GTIN-14, grouping/packaging level"},
@@ -168,6 +233,24 @@ func TestAlignedForceFormats(t *testing.T) {
 			}
 			if results[0].IDType != testCase.idType || results[0].Version != testCase.version {
 				t.Fatalf("got %q / %q, want %q / %q", results[0].IDType, results[0].Version, testCase.idType, testCase.version)
+			}
+		})
+	}
+}
+
+func TestGenerationMatchesAlignedParsers(t *testing.T) {
+	for _, format := range []string{"scru128", "nanoid"} {
+		t.Run(format, func(t *testing.T) {
+			parser := NewRegistry().GetParser(format)
+			if parser == nil {
+				t.Fatalf("missing generator for %s", format)
+			}
+			generated, err := parser.Generate()
+			if err != nil {
+				t.Fatalf("failed to generate %s: %v", format, err)
+			}
+			if results := ParseIDWithOptions(generated, format, types.ParseOptions{}); len(results) != 1 {
+				t.Fatalf("generated %s is not accepted by aligned parser: %q", format, generated)
 			}
 		})
 	}

@@ -154,17 +154,8 @@ func TestSCRU128Parser_Generate(t *testing.T) {
 		t.Fatalf("Failed to generate SCRU128: %v", err)
 	}
 
-	// The current implementation generates a simple hex format
-	// Check that it's a reasonable hex string
-	if len(generated) == 0 {
-		t.Error("Generated SCRU128 should not be empty")
-	}
-
-	// Check character set (should be hex characters)
-	for _, char := range generated {
-		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f')) {
-			t.Errorf("Generated SCRU128 contains invalid character '%c': %s", char, generated)
-		}
+	if len(generated) != 26 || !parser.CanParse(generated) {
+		t.Errorf("Generated SCRU128 is invalid: %s", generated)
 	}
 
 	// Test that multiple generations produce different results

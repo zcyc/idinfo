@@ -42,6 +42,9 @@ func NewRegistry() *Registry {
 			&alignedParser{name: "scru64", parse: func(input string, options types.ParseOptions) (*types.IDInfo, error) {
 				return parseSCRU64Aligned(input, options)
 			}},
+			&alignedParser{name: "scru128", parse: func(input string, options types.ParseOptions) (*types.IDInfo, error) {
+				return parseSCRU128Aligned(input, options)
+			}, generate: generateSCRU128},
 			&alignedParser{name: "datadog", parse: func(input string, options types.ParseOptions) (*types.IDInfo, error) {
 				return parseDatadog(input, options)
 			}},

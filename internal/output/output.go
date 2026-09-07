@@ -1,50 +1,46 @@
 package output
 
 import (
+	"encoding/hex"
 	"fmt"
+	"math/big"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/zcyc/idinfo/internal/types"
 )
 
 // ShowCard displays the ID information in a card format
 func ShowCard(info *types.IDInfo) {
-	// Create the card
-	fmt.Println("┏━━━━━━━━━━━┯━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓")
-
-	// ID Type
-	fmt.Printf("┃ %-9s │ %-43s ┃\n", "ID Type", info.IDType)
-
-	// Rust's card always includes the optional fields as "-".
+	timestamp := cardTimestamp(info)
+	rSpace := maxInt(43, utf8.RuneCountInString(timestamp))
+	border := func(top, left, middle, right string) {
+		fmt.Printf("%s%s%s%s%s\n", left, strings.Repeat(top, 10), middle, strings.Repeat(top, rSpace), right)
+	}
+	row := func(label, value string) {
+		fmt.Printf("┃ %-9s │ %-*s ┃\n", label, rSpace, value)
+	}
+	border("━", "┏━", "┯", "━━┓")
+	row("ID Type", info.IDType)
 	version := info.Version
 	if version == "" {
 		version = "-"
 	}
-	fmt.Printf("┃ %-9s │ %-43s ┃\n", "Version", version)
-
-	fmt.Println("┠───────────┼─────────────────────────────────────────────┨")
-
-	// Standard representation
-	fmt.Printf("┃ %-9s │ %-43s ┃\n", "String", info.Standard)
-	// Integer representation
+	row("Version", version)
+	border("─", "┠─", "┼", "──┨")
+	row("String", truncateCardValue(info.Standard))
 	if info.Integer != nil {
-		intStr := *info.Integer
-		if len(intStr) > 43 {
-			intStr = intStr[:40] + "..."
-		}
-		fmt.Printf("┃ %-9s │ %-43s ┃\n", "Integer", intStr)
+		row("Integer", *info.Integer)
 	}
 	if info.UUIDWrap != nil {
-		fmt.Printf("┃ %-9s │ %-43s ┃\n", "UUID wrap", *info.UUIDWrap)
+		row("UUID wrap", *info.UUIDWrap)
 	}
-
-	fmt.Println("┠───────────┼─────────────────────────────────────────────┨")
-
-	// Size and entropy
-	fmt.Printf("┃ %-9s │ %-43s ┃\n", "Size", sizeDescription(info))
+	border("─", "┠─", "┼", "──┨")
+	row("Size", sizeDescription(info))
 	entropy := "-"
 	if info.Size > 0 {
 		value := 0
@@ -53,94 +49,113 @@ func ShowCard(info *types.IDInfo) {
 		}
 		entropy = fmt.Sprintf("%d bits", value)
 	}
-	fmt.Printf("┃ %-9s │ %-43s ┃\n", "Entropy", entropy)
-
-	// Timestamp
-	timeStr := "-"
-	if info.Timestamp != nil {
-		timeStr = *info.Timestamp
-		if info.DateTime != nil {
-			timeStr = fmt.Sprintf("%s (%s)", timeStr, info.DateTime.UTC().Format("2006-01-02T15:04:05.000Z07:00"))
-		}
-	}
-	fmt.Printf("┃ %-9s │ %-43s ┃\n", "Timestamp", timeStr)
+	row("Entropy", entropy)
+	row("Timestamp", timestamp)
 	if info.Relative != nil {
-		fmt.Printf("┃ %-9s │ %-43s ┃\n", "Relative", *info.Relative)
+		row("Relative", *info.Relative)
 	}
-
-	// Node information
-	if info.Node1 != nil {
-		fmt.Printf("┃ %-9s │ %-43s ┃\n", "Node 1", *info.Node1)
-	} else {
-		fmt.Printf("┃ %-9s │ %-43s ┃\n", "Node 1", "-")
-	}
-
-	if info.Node2 != nil {
-		fmt.Printf("┃ %-9s │ %-43s ┃\n", "Node 2", *info.Node2)
-	} else {
-		fmt.Printf("┃ %-9s │ %-43s ┃\n", "Node 2", "-")
-	}
+	row("Node 1", truncateCardValue(pointerValue(info.Node1, "-")))
+	row("Node 2", truncateCardValue(pointerValue(info.Node2, "-")))
 	if info.Node3 != nil {
-		fmt.Printf("┃ %-9s │ %-43s ┃\n", "Node 3", *info.Node3)
+		row("Node 3", truncateCardValue(*info.Node3))
 	}
-
-	// Sequence
-	if info.Sequence != nil {
-		fmt.Printf("┃ %-9s │ %-43s ┃\n", "Sequence", fmt.Sprintf("%d", *info.Sequence))
-	} else {
-		fmt.Printf("┃ %-9s │ %-43s ┃\n", "Sequence", "-")
+	row("Sequence", pointerInt64Value(info.Sequence, "-"))
+	border("─", "┠─", "┼", "──┨")
+	for _, line := range cardBinaryLines(info.Hex) {
+		row(line.hex, line.binary)
 	}
+	border("━", "┗━", "┷", "━━┛")
+}
 
-	fmt.Println("┠───────────┼─────────────────────────────────────────────┨")
+type cardBinaryLine struct{ hex, binary string }
 
-	// Show hex and binary representation
-	hex := info.Hex
-	if len(hex) > 0 {
-		// Format hex in groups of 4 characters
-		var hexGroups []string
-		for i := 0; i < len(hex); i += 8 {
-			end := i + 8
-			if end > len(hex) {
-				end = len(hex)
+func cardBinaryLines(value string) []cardBinaryLine {
+	if value == "" {
+		return []cardBinaryLine{{"No hex", "No bits (non-numeric ID)"}}
+	}
+	padded := value + strings.Repeat(".", (8-len(value)%8)%8)
+	lines := make([]cardBinaryLine, 0, len(padded)/8)
+	for start := 0; start < len(padded); start += 8 {
+		group := padded[start : start+8]
+		var binary strings.Builder
+		for index, char := range group {
+			value := "...."
+			if char != '.' {
+				nibble, _ := strconv.ParseUint(string(char), 16, 4)
+				value = fmt.Sprintf("%04b", nibble)
 			}
-			group := hex[i:end]
-			// Split into 4-char chunks
-			var subgroups []string
-			for j := 0; j < len(group); j += 4 {
-				subEnd := j + 4
-				if subEnd > len(group) {
-					subEnd = len(group)
-				}
-				subgroups = append(subgroups, group[j:subEnd])
+			binary.WriteString(value)
+			binary.WriteByte(' ')
+			if (index+1)%2 == 0 {
+				binary.WriteByte(' ')
 			}
-			hexGroups = append(hexGroups, strings.Join(subgroups, " "))
-		}
-
-		// Show hex and binary
-		for i, group := range hexGroups {
-			if i < len(hexGroups) {
-				// Convert to binary
-				binaryStr := ""
-				for _, char := range strings.ReplaceAll(group, " ", "") {
-					if char >= '0' && char <= '9' {
-						val := int(char - '0')
-						binaryStr += fmt.Sprintf("%04b ", val)
-					} else if char >= 'a' && char <= 'f' {
-						val := int(char - 'a' + 10)
-						binaryStr += fmt.Sprintf("%04b ", val)
-					} else if char >= 'A' && char <= 'F' {
-						val := int(char - 'A' + 10)
-						binaryStr += fmt.Sprintf("%04b ", val)
-					}
-				}
-				binaryStr = strings.TrimSpace(binaryStr)
-
-				fmt.Printf("┃ %-9s │ %-43s ┃\n", group, binaryStr)
+			if (index+1)%4 == 0 {
+				binary.WriteByte(' ')
+			}
+			if (index+1)%8 == 0 {
+				binary.WriteByte(' ')
 			}
 		}
+		hexLine := group[:4] + " " + group[4:]
+		lines = append(lines, cardBinaryLine{hexLine, strings.TrimSpace(binary.String())})
 	}
+	return lines
+}
 
-	fmt.Println("┗━━━━━━━━━━━┷━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
+func cardTimestamp(info *types.IDInfo) string {
+	if info.Timestamp == nil {
+		return "-"
+	}
+	timestamp := *info.Timestamp
+	if dot := strings.IndexByte(timestamp, '.'); dot >= 0 {
+		end := dot + 4
+		if end > len(timestamp) {
+			end = len(timestamp)
+		}
+		timestamp = timestamp[:end]
+	}
+	if info.DateTime == nil {
+		return timestamp + " (-)"
+	}
+	return timestamp + " (" + cardDateTime(*info.DateTime) + ")"
+}
+
+func cardDateTime(value time.Time) string {
+	value = value.UTC()
+	result := value.Format("2006-01-02T15:04:05.000Z07:00")
+	if value.Year() >= 10000 {
+		result = "+" + result
+	}
+	return result
+}
+
+func truncateCardValue(value string) string {
+	if utf8.RuneCountInString(value) <= 43 {
+		return value
+	}
+	runes := []rune(value)
+	return string(runes[:40]) + "..."
+}
+
+func pointerValue(value *string, fallback string) string {
+	if value == nil {
+		return fallback
+	}
+	return *value
+}
+
+func pointerInt64Value(value *int64, fallback string) string {
+	if value == nil {
+		return fallback
+	}
+	return strconv.FormatInt(*value, 10)
+}
+
+func maxInt(left, right int) int {
+	if left > right {
+		return left
+	}
+	return right
 }
 
 func sizeDescription(info *types.IDInfo) string {
@@ -164,19 +179,36 @@ func ShowShort(info *types.IDInfo) {
 
 // ShowBinary outputs the raw binary representation
 func ShowBinary(info *types.IDInfo) {
-	if info.Binary != nil {
-		os.Stdout.Write(info.Binary)
+	if info.Integer != nil && info.Size <= 128 {
+		if value, ok := new(big.Int).SetString(*info.Integer, 10); ok {
+			data := make([]byte, 16)
+			bytes := value.Bytes()
+			if len(bytes) > len(data) {
+				bytes = bytes[len(bytes)-len(data):]
+			}
+			copy(data[len(data)-len(bytes):], bytes)
+			offset := (128 - info.Size) / 8
+			_, _ = os.Stdout.Write(data[offset:])
+			return
+		}
 	}
+	if info.Hex != "" {
+		if data, err := hex.DecodeString(info.Hex); err == nil {
+			_, _ = os.Stdout.Write(data)
+			return
+		}
+	}
+	if info.Binary != nil {
+		_, _ = os.Stdout.Write(info.Binary)
+		return
+	}
+	fmt.Println(info.Standard)
 }
 
 // ShowEverything displays all successful parses
 func ShowEverything(results []*types.IDInfo) {
-	fmt.Printf("Successfully parsed as %d different formats:\n\n", len(results))
-
-	for i, info := range results {
-		fmt.Printf("=== Format %d: %s ===\n", i+1, info.IDType)
+	for _, info := range results {
 		ShowCard(info)
-		fmt.Println()
 	}
 }
 

@@ -20,13 +20,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ipfs/go-cid"
-	"github.com/lithammer/shortuuid/v4"
 	mh "github.com/multiformats/go-multihash"
 	"github.com/nrednav/cuid2"
 	"github.com/oklog/ulid/v2"
 	"github.com/rs/xid"
 	"github.com/rushysloth/go-tsid"
-	"github.com/speps/go-hashids/v2"
 	"github.com/sqids/sqids-go"
 	"github.com/uber/h3-go/v4"
 	"github.com/zcyc/idinfo/internal/types"
@@ -148,6 +146,225 @@ func encodeBase(value *big.Int, alphabet string, width int) string {
 	return string(reversed)
 }
 
+const sqidsDefaultAlphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+const shortUUIDRustAlphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+func decodeSqidChecked(input, alphabet string) ([]uint64, error) {
+	if input == "" {
+		return nil, nil
+	}
+
+	base := []rune(alphabet)
+	shuffled := sqidShuffle(base)
+	allowed := make(map[rune]struct{}, len(shuffled))
+	for _, char := range shuffled {
+		allowed[char] = struct{}{}
+	}
+	runes := []rune(input)
+	for _, char := range runes {
+		if _, ok := allowed[char]; !ok {
+			return nil, nil
+		}
+	}
+
+	offset := 0
+	for index, char := range shuffled {
+		if char == runes[0] {
+			offset = index
+			break
+		}
+	}
+	alphabetRunes := append(append([]rune(nil), shuffled[offset:]...), shuffled[:offset]...)
+	reverseRunesInPlace(alphabetRunes)
+	runes = runes[1:]
+	result := make([]uint64, 0)
+	for len(runes) > 0 {
+		separator := alphabetRunes[0]
+		chunks := splitRunes(runes, separator)
+		if len(chunks) == 0 || len(chunks[0]) == 0 {
+			return result, nil
+		}
+		if value, ok := sqidToNumberChecked(chunks[0], alphabetRunes[1:]); ok {
+			result = append(result, value)
+		}
+		if len(chunks) > 1 {
+			alphabetRunes = sqidShuffle(alphabetRunes)
+		}
+		runes = joinRunes(chunks[1:], separator)
+	}
+	return result, nil
+}
+
+func sqidShuffle(input []rune) []rune {
+	result := append([]rune(nil), input...)
+	for i, j := 0, len(result)-1; j > 0; i, j = i+1, j-1 {
+		r := (i*j + int(result[i]) + int(result[j])) % len(result)
+		result[i], result[r] = result[r], result[i]
+	}
+	return result
+}
+
+func reverseRunesInPlace(input []rune) {
+	for left, right := 0, len(input)-1; left < right; left, right = left+1, right-1 {
+		input[left], input[right] = input[right], input[left]
+	}
+}
+
+func splitRunes(input []rune, separator rune) [][]rune {
+	result := [][]rune{{}}
+	for _, char := range input {
+		if char == separator {
+			result = append(result, []rune{})
+		} else {
+			result[len(result)-1] = append(result[len(result)-1], char)
+		}
+	}
+	return result
+}
+
+func joinRunes(parts [][]rune, separator rune) []rune {
+	var result []rune
+	for index, part := range parts {
+		if index > 0 {
+			result = append(result, separator)
+		}
+		result = append(result, part...)
+	}
+	return result
+}
+
+func sqidToNumberChecked(input, alphabet []rune) (uint64, bool) {
+	base := uint64(len(alphabet))
+	var result uint64
+	for _, char := range input {
+		index := -1
+		for i, candidate := range alphabet {
+			if candidate == char {
+				index = i
+				break
+			}
+		}
+		if index < 0 || result > (^uint64(0)-uint64(index))/base {
+			return 0, false
+		}
+		result = result*base + uint64(index)
+	}
+	return result, true
+}
+
+const (
+	hashIDDefaultAlphabet           = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
+	hashIDDefaultSeparators         = "cfhistuCFHISTU"
+	hashIDSeparatorRatioNumerator   = 2
+	hashIDSeparatorRatioDenominator = 7
+)
+
+func decodeHashIDChecked(input, salt string) ([]uint64, error) {
+	if input == "" {
+		return nil, nil
+	}
+
+	alphabet := make([]rune, 0, len(hashIDDefaultAlphabet))
+	separators := []rune(hashIDDefaultSeparators)
+	for _, char := range hashIDDefaultAlphabet {
+		if !strings.ContainsRune(hashIDDefaultSeparators, char) {
+			alphabet = append(alphabet, char)
+		}
+	}
+	minimumSeparators := (hashIDSeparatorRatioNumerator*len(alphabet) + hashIDSeparatorRatioDenominator - 1) / hashIDSeparatorRatioDenominator
+	if missing := minimumSeparators - len(separators); missing > 0 {
+		separators = append(separators, alphabet[:missing]...)
+		alphabet = alphabet[missing:]
+	}
+	saltRunes := []rune(salt)
+	separators = hashIDReorder(separators, saltRunes)
+	alphabet = hashIDReorder(alphabet, saltRunes)
+	guardCount := (len(alphabet) + 11) / 12
+	guards := append([]rune(nil), alphabet[:guardCount]...)
+	alphabet = alphabet[guardCount:]
+
+	parts := splitByRunes([]rune(input), guards)
+	partIndex := 0
+	if len(parts) == 2 || len(parts) == 3 {
+		partIndex = 1
+	}
+	hash := parts[partIndex]
+	if len(hash) == 0 {
+		return nil, errors.New("missing Hashid lottery character")
+	}
+	lottery := hash[0]
+	hash = hash[1:]
+	parts = splitByRunes(hash, separators)
+	result := make([]uint64, 0, len(parts))
+	for _, part := range parts {
+		alphabetSalt := make([]rune, 0, len(alphabet))
+		alphabetSalt = append(alphabetSalt, lottery)
+		alphabetSalt = append(alphabetSalt, saltRunes...)
+		alphabetSalt = append(alphabetSalt, alphabet...)
+		alphabet = hashIDReorder(alphabet, alphabetSalt[:len(alphabet)])
+		value, ok := hashIDUnhashChecked(part, alphabet)
+		if !ok {
+			return nil, errors.New("invalid Hashid")
+		}
+		result = append(result, value)
+	}
+	return result, nil
+}
+
+func hashIDReorder(input, salt []rune) []rune {
+	result := append([]rune(nil), input...)
+	if len(salt) == 0 {
+		return result
+	}
+	intSum, saltIndex := 0, 0
+	for index := len(result) - 1; index > 0; index-- {
+		value := int(salt[saltIndex])
+		intSum += value
+		swap := (value + saltIndex + intSum) % index
+		result[index], result[swap] = result[swap], result[index]
+		saltIndex = (saltIndex + 1) % len(salt)
+	}
+	return result
+}
+
+func splitByRunes(input, separators []rune) [][]rune {
+	result := [][]rune{{}}
+	for _, char := range input {
+		found := false
+		for _, separator := range separators {
+			if char == separator {
+				found = true
+				break
+			}
+		}
+		if found {
+			result = append(result, []rune{})
+		} else {
+			result[len(result)-1] = append(result[len(result)-1], char)
+		}
+	}
+	return result
+}
+
+func hashIDUnhashChecked(input, alphabet []rune) (uint64, bool) {
+	base := uint64(len(alphabet))
+	var result uint64
+	for _, char := range input {
+		index := -1
+		for i, candidate := range alphabet {
+			if candidate == char {
+				index = i
+				break
+			}
+		}
+		if index < 0 || result > (^uint64(0)-uint64(index))/base {
+			return 0, false
+		}
+		result = result*base + uint64(index)
+	}
+	return result, true
+}
+
 func parseBigDecimal(value string, bits int) (*big.Int, error) {
 	if value == "" || strings.HasPrefix(value, "-") {
 		return nil, errors.New("not an unsigned integer")
@@ -180,6 +397,17 @@ func timestampInfo(rawMillis, epoch int64) (*string, *time.Time) {
 	}
 	datetime := time.Unix(seconds, nanos).UTC()
 	timestamp := fmt.Sprintf("%d.%03d", seconds, datetime.Nanosecond()/int(time.Millisecond))
+	return &timestamp, &datetime
+}
+
+func timestampNanosInfo(nanos uint64) (*string, *time.Time) {
+	seconds := nanos / 1_000_000_000
+	remaining := nanos % 1_000_000_000
+	if seconds > uint64(^uint64(0)>>1) {
+		return nil, nil
+	}
+	datetime := time.Unix(int64(seconds), int64(remaining)).UTC()
+	timestamp := fmt.Sprintf("%d.%09d", seconds, remaining)
 	return &timestamp, &datetime
 }
 
@@ -281,7 +509,7 @@ func parseUUIDAligned(input string, options types.ParseOptions) (*types.IDInfo, 
 		info.Sequence = int64Ptr(int64(binary.BigEndian.Uint16(value[8:10]) & 0x3fff))
 		info.Node1 = stringPtr(formatNodeID(value[10:16]))
 	}
-	info.HighConfidence = value != uuid.Nil && binary.BigEndian.Uint32(value[12:]) != 0
+	info.HighConfidence = value == uuid.Nil || binary.BigEndian.Uint32(value[4:8]) != 0
 	info.Extra["variant"] = map[uuid.Variant]string{
 		uuid.Reserved: "NCS (Network Computing System)", uuid.RFC4122: "RFC 4122",
 		uuid.Microsoft: "Microsoft GUID", uuid.Future: "Future",
@@ -290,14 +518,11 @@ func parseUUIDAligned(input string, options types.ParseOptions) (*types.IDInfo, 
 }
 
 func parseShortUUIDAligned(input string, options types.ParseOptions) (*types.IDInfo, error) {
-	if len(input) != 22 {
-		return nil, errors.New("invalid ShortUUID length")
+	value, err := decodeBase(input, shortUUIDRustAlphabet)
+	if err != nil || value.BitLen() > 128 {
+		return nil, errors.New("invalid ShortUUID")
 	}
-	value, err := shortuuid.DefaultEncoder.Decode(input)
-	if err != nil {
-		return nil, err
-	}
-	return withUUIDWrapper(input, options, "ShortUUID", "from base57", value[:])
+	return withUUIDWrapper(input, options, "ShortUUID", "from base57", bigEndianBytes(value, 16))
 }
 
 func withUUIDWrapper(input string, options types.ParseOptions, prefix, parsed string, data []byte) (*types.IDInfo, error) {
@@ -342,8 +567,14 @@ func parseUUIDBase64(input string, options types.ParseOptions) (*types.IDInfo, e
 	var err error
 	if strings.Contains(input, "=") {
 		data, err = base64.URLEncoding.DecodeString(input)
+		if err == nil && base64.URLEncoding.EncodeToString(data) != input {
+			err = errors.New("non-canonical UUID base64")
+		}
 	} else {
 		data, err = base64.RawURLEncoding.DecodeString(input)
+		if err == nil && base64.RawURLEncoding.EncodeToString(data) != input {
+			err = errors.New("non-canonical UUID base64")
+		}
 		padded = false
 	}
 	if err != nil || len(data) != 16 {
@@ -415,24 +646,93 @@ func parseJulid(input string, options types.ParseOptions) (*types.IDInfo, error)
 const (
 	crockfordAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 	base62Alphabet    = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+	upidAlphabet      = "234567abcdefghijklmnopqrstuvwxyz"
 )
 
+func upidValue(char byte) (byte, bool) {
+	index := strings.IndexByte(upidAlphabet, char)
+	return byte(index), index >= 0
+}
+
+func decodeUPID(input string) (*big.Int, error) {
+	encoded := strings.ReplaceAll(input, "_", "")
+	if len(encoded) != 26 {
+		return nil, errors.New("invalid UPID length")
+	}
+	values := make([]byte, len(encoded))
+	for index := range encoded {
+		value, ok := upidValue(encoded[index])
+		if !ok {
+			return nil, errors.New("invalid UPID character")
+		}
+		values[index] = value
+	}
+	if values[len(values)-1] > 15 || values[24] > 15 {
+		return nil, errors.New("invalid UPID overflow")
+	}
+	data := []byte{
+		values[4]<<3 | values[5]>>2,
+		values[5]<<6 | values[6]<<1 | values[7]>>4,
+		values[7]<<4 | values[8]>>1,
+		values[8]<<7 | values[9]<<2 | values[10]>>3,
+		values[10]<<5 | values[11],
+		values[12]<<3 | values[13]>>2,
+		values[13]<<6 | values[14]<<1 | values[15]>>4,
+		values[15]<<4 | values[16]>>1,
+		values[16]<<7 | values[17]<<2 | values[18]>>3,
+		values[18]<<5 | values[19],
+		values[20]<<3 | values[21]>>2,
+		values[21]<<6 | values[22]<<1 | values[23]>>4,
+		values[23]<<4 | values[24]&15,
+		values[0]<<3 | values[1]>>2,
+		values[1]<<6 | values[2]<<1 | values[3]>>4,
+		values[3]<<4 | values[25]&15,
+	}
+	return new(big.Int).SetBytes(data), nil
+}
+
+func encodeUPID(data []byte) string {
+	encode := func(values ...byte) string {
+		result := make([]byte, len(values))
+		for index, value := range values {
+			result[index] = upidAlphabet[value]
+		}
+		return string(result)
+	}
+	timePart := encode(
+		data[0]>>3,
+		data[0]<<2&28|data[1]>>6,
+		data[1]>>1&31,
+		data[1]<<4&16|data[2]>>4,
+		data[2]<<1&30|data[3]>>7,
+		data[3]>>2&31,
+		data[3]<<3&24|data[4]>>5,
+		data[4]&31,
+	)
+	randomPart := encode(
+		data[5]>>3,
+		data[5]<<2&28|data[6]>>6,
+		data[6]>>1&31,
+		data[6]<<4&16|data[7]>>4,
+		data[7]<<1&30|data[8]>>7,
+		data[8]>>2&31,
+		data[8]<<3&24|data[9]>>5,
+		data[9]&31,
+		data[10]>>3,
+		data[10]<<2&28|data[11]>>6,
+		data[11]>>1&31,
+		data[11]<<4&16|data[12]>>4,
+		data[12]&15,
+	)
+	prefix := encode(data[13]>>3, data[13]<<2&28|data[14]>>6, data[14]>>1&31, data[14]<<4&16|data[15]>>4)
+	version := encode(data[15] & 15)
+	return prefix + "_" + timePart + randomPart + version
+}
+
 func parseUPID(input string, options types.ParseOptions) (*types.IDInfo, error) {
-	parts := strings.SplitN(input, "_", 2)
-	var value *big.Int
-	fromBase36 := len(parts) == 2 && len(parts[0]) >= 1 && len(parts[0]) <= 31 && len(parts[1]) == 22
-	if fromBase36 {
-		for _, char := range parts[0] {
-			if (char < 'a' || char > 'z') && (char < '0' || char > '9') {
-				return nil, errors.New("invalid UPID prefix")
-			}
-		}
-		var err error
-		value, err = decodeBase(parts[1], "0123456789abcdefghijklmnopqrstuvwxyz")
-		if err != nil || value.BitLen() > 128 {
-			return nil, errors.New("invalid UPID payload")
-		}
-	} else {
+	value, err := decodeUPID(input)
+	fromBase32 := err == nil
+	if !fromBase32 {
 		wrapped, err := uuid.Parse(input)
 		if err != nil {
 			return nil, errors.New("invalid UPID")
@@ -440,29 +740,37 @@ func parseUPID(input string, options types.ParseOptions) (*types.IDInfo, error) 
 		value = new(big.Int).SetBytes(wrapped[:])
 	}
 	data := bigEndianBytes(value, 16)
-	standard := encodeBase(value, "0123456789abcdefghijklmnopqrstuvwxyz", 22)
+	standard := encodeUPID(data)
 	parsed := "from hex"
 	idType := "UPID wrapped in UUID"
-	if fromBase36 {
-		standard, parsed, idType = input, "from Crockford's base32", "UPID"
+	if fromBase32 {
+		parsed, idType = "from Crockford's base32", "UPID"
 	}
 	info := infoFromBytes(idType, "A (default)", standard, parsed, data, 128, 64)
 	setIntegerValue(info, value, 16)
-	if fromBase36 {
-		info.Node1 = stringPtr(parts[0])
-	}
+	info.Node1 = stringPtr(standard[:4])
 	wrapped, _ := uuidFromBytes(data)
 	info.UUIDWrap = stringPtr(wrapped.String())
-	info.HighConfidence = fromBase36
+	info.Timestamp, info.DateTime = timestampInfo(int64(new(big.Int).Rsh(new(big.Int).Set(value), 88).Int64())*256, epochMillis(options, 0))
+	info.HighConfidence = fromBase32
 	return info, nil
 }
 
 func decodeSandflake(input string) ([]byte, error) {
-	value, err := decodeBase(input, "0123456789ABCDEFGHJKMNPQRSTVWXYZ")
-	if err != nil || value.BitLen() > 128 {
+	if len(input) != 26 {
 		return nil, errors.New("invalid Sandflake")
 	}
+	value, err := decodeBase(input, "0123456789ABCDEFGHJKMNPQRSTVWXYZ")
+	if err != nil {
+		return nil, errors.New("invalid Sandflake")
+	}
+	value.Rsh(value, 2)
 	return bigEndianBytes(value, 16), nil
+}
+
+func encodeSandflake(data []byte) string {
+	value := new(big.Int).Lsh(new(big.Int).SetBytes(data), 2)
+	return encodeBase(value, "0123456789ABCDEFGHJKMNPQRSTVWXYZ", 26)
 }
 
 func parseSandflake(input string, options types.ParseOptions) (*types.IDInfo, error) {
@@ -484,7 +792,7 @@ func parseSandflake(input string, options types.ParseOptions) (*types.IDInfo, er
 	}
 	info := infoFromBytes(idType, "", input, parsed, data, 128, 24)
 	setIntegerValue(info, new(big.Int).SetBytes(data), 16)
-	info.Standard = encodeBase(new(big.Int).SetBytes(data), "0123456789ABCDEFGHJKMNPQRSTVWXYZ", 26)
+	info.Standard = encodeSandflake(data)
 	wrapped, _ := uuidFromBytes(data)
 	if idType == "Sandflake wrapped in UUID" {
 		info.UUIDWrap = stringPtr(input)
@@ -556,7 +864,7 @@ func parseFlake(input string, options types.ParseOptions) (*types.IDInfo, error)
 		}
 		data, idType, parsed = append([]byte(nil), value[:]...), "Flake (Boundary) wrapped in UUID", "from hex"
 	}
-	info := infoFromBytes(idType, "", input, parsed, data, 128, 16)
+	info := infoFromBytes(idType, "", input, parsed, data, 128, 0)
 	setIntegerValue(info, new(big.Int).SetBytes(data), 16)
 	info.Standard = encodeBase(new(big.Int).SetBytes(data), base62Alphabet, 0)
 	wrapped, _ := uuidFromBytes(data)
@@ -579,7 +887,8 @@ func parseSCRU128Aligned(input string, options types.ParseOptions) (*types.IDInf
 		value = new(big.Int).SetBytes(wrapped[:])
 	}
 	data := bigEndianBytes(value, 16)
-	info := infoFromBytes("SCRU128", "", input, "from base36", data, 128, 80)
+	standard := encodeBase(value, "0123456789abcdefghijklmnopqrstuvwxyz", 25)
+	info := infoFromBytes("SCRU128", "", standard, "from base36", data, 128, 80)
 	if !fromBase36 {
 		info.IDType = "SCRU128 wrapped in UUID"
 		info.Parsed = "from hex"
@@ -588,26 +897,23 @@ func parseSCRU128Aligned(input string, options types.ParseOptions) (*types.IDInf
 	setIntegerValue(info, value, 16)
 	wrapped, _ := uuidFromBytes(data)
 	info.UUIDWrap = stringPtr(wrapped.String())
-	info.Timestamp, info.DateTime = timestampInfo(new(big.Int).Rsh(new(big.Int).Set(value), 84).Int64(), epochMillis(options, 0))
-	counter := new(big.Int).Rsh(new(big.Int).Set(value), 56)
-	counter.And(counter, big.NewInt((1<<28)-1))
-	info.Sequence = int64Ptr(counter.Int64())
+	info.Timestamp, info.DateTime = timestampInfo(new(big.Int).Rsh(new(big.Int).Set(value), 80).Int64(), epochMillis(options, 0))
 	return info, nil
 }
 
 func parseSCRU64Aligned(input string, options types.ParseOptions) (*types.IDInfo, error) {
-	if len(input) < 1 || len(input) > 13 {
+	if len(input) != 12 {
 		return nil, errors.New("invalid SCRU64")
 	}
-	value, err := decodeBase(strings.ToUpper(input), crockfordAlphabet)
+	value, err := decodeBase(strings.ToLower(input), "0123456789abcdefghijklmnopqrstuvwxyz")
 	if err != nil || value.BitLen() > 64 {
 		return nil, errors.New("invalid SCRU64")
 	}
 	number := value.Uint64()
 	info := infoFromBytes("SCRU64", "", input, "from base36", bigEndianBytes(value, 8), 64, 0)
 	setIntegerValue(info, value, 8)
-	info.Timestamp, info.DateTime = timestampInfo(int64(number>>20)*256, epochMillis(options, 0))
-	info.Node1 = stringPtr(fmt.Sprintf("%d (Node ID)", (number>>12)&0xfff))
+	info.Timestamp, info.DateTime = timestampInfo(int64(number>>24)*256, epochMillis(options, 0))
+	info.Node1 = stringPtr(fmt.Sprintf("%d (Node ID)", number&0xffffff))
 	return info, nil
 }
 
@@ -689,7 +995,7 @@ func parseComb(input string, options types.ParseOptions) (*types.IDInfo, error) 
 			valid++
 		}
 	}
-	info := infoFromBytes("COMB", chosen.name, value.String(), "from hex", b, 128, 74)
+	info := infoFromBytes("COMB", chosen.name, value.String(), "", b, 128, 74)
 	setIntegerValue(info, new(big.Int).SetBytes(b), 16)
 	if chosen.ms < 946684800000 {
 		return nil, errors.New("invalid COMB timestamp")
@@ -727,7 +1033,7 @@ var snowflakeLayouts = map[string]snowflakeLayout{
 	"sf-linkedin":    {"LinkedIn", 0, 1, 41, 42, 10, nil, 52, 12},
 	"sf-mastodon":    {"Mastodon", 0, 0, 48, 0, 0, nil, 48, 16},
 	"sf-frostflake":  {"Frostflake", 0, 0, 32, 53, 11, nil, 32, 21},
-	"sf-flakeid":     {"Flake ID", 0, 42, 42, 42, 5, func(v uint64) string { return fmt.Sprintf("%d (Worker ID)", bitsU64(v, 47, 5)) }, 52, 12},
+	"sf-flakeid":     {"Flake ID", 0, 0, 42, 42, 5, func(v uint64) string { return fmt.Sprintf("%d (Worker ID)", bitsU64(v, 47, 5)) }, 52, 12},
 	"sf-simpleflake": {"Simpleflake", 946702800000, 0, 41, 0, 0, nil, 0, 0},
 }
 
@@ -748,7 +1054,7 @@ func parseSnowflakeAligned(input string, options types.ParseOptions, layoutName 
 		return nil, errors.New("unknown Snowflake layout")
 	}
 	standard := strconv.FormatUint(value, 10)
-	if fromBase58 {
+	if fromBase58 || layoutName == "sf-frostflake" {
 		standard = encodeBase(new(big.Int).SetUint64(value), "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz", 0)
 	}
 	info := infoFromBytes("Snowflake", layout.name, standard, "as integer", bigEndianBytes(new(big.Int).SetUint64(value), 8), 64, 0)
@@ -853,7 +1159,7 @@ func parseUnixAligned(input string, options types.ParseOptions, mode unixMode, r
 	info := infoFromBytes("Unix timestamp", version, input, "as integer", bigEndianBytes(new(big.Int).SetUint64(value), 8), 64, 0)
 	setIntegerValue(info, new(big.Int).SetUint64(value), 8)
 	info.Standard = input
-	info.Timestamp, info.DateTime = timestampInfo(int64(nanos/1_000_000), 0)
+	info.Timestamp, info.DateTime = timestampNanosInfo(nanos)
 	info.Extra["unit"] = unit
 	return info, nil
 }
@@ -924,7 +1230,7 @@ func parseNanoIDAligned(input string, options types.ParseOptions) (*types.IDInfo
 	}
 	alphabet := options.Alphabet
 	if alphabet == "" {
-		alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz"
+		alphabet = uuinfoNanoIDAlphabet
 	}
 	for _, char := range input {
 		if !strings.ContainsRune(alphabet, char) {
@@ -1176,14 +1482,18 @@ func parseStripe(input string, options types.ParseOptions) (*types.IDInfo, error
 
 func parseSqidAligned(input string, options types.ParseOptions) (*types.IDInfo, error) {
 	instanceOptions := []sqids.Options{}
+	alphabet := sqidsDefaultAlphabet
 	if options.Alphabet != "" {
 		instanceOptions = append(instanceOptions, sqids.Options{Alphabet: options.Alphabet})
+		alphabet = options.Alphabet
 	}
-	instance, err := sqids.New(instanceOptions...)
+	if _, err := sqids.New(instanceOptions...); err != nil {
+		return nil, err
+	}
+	numbers, err := decodeSqidChecked(input, alphabet)
 	if err != nil {
 		return nil, err
 	}
-	numbers := instance.Decode(input)
 	if len(numbers) == 0 {
 		return nil, errors.New("invalid Sqid")
 	}
@@ -1216,14 +1526,11 @@ func parseHashID(input string, options types.ParseOptions) (*types.IDInfo, error
 	if len(input) == 0 || len(input) > 43 {
 		return nil, errors.New("invalid Hashid")
 	}
-	idData := hashids.NewData()
-	idData.Salt = options.Salt
-	id, err := hashids.NewWithData(idData)
+	numbers, err := decodeHashIDChecked(input, options.Salt)
 	if err != nil {
 		return nil, err
 	}
-	numbers, err := id.DecodeInt64WithError(input)
-	if err != nil || len(numbers) == 0 {
+	if len(numbers) == 0 {
 		return nil, errors.New("invalid Hashid")
 	}
 	version := "No salt"
@@ -1234,7 +1541,7 @@ func parseHashID(input string, options types.ParseOptions) (*types.IDInfo, error
 	parts := make([]string, len(numbers))
 	allTrailingZero := true
 	for index, number := range numbers {
-		parts[index] = strconv.FormatInt(number, 10)
+		parts[index] = strconv.FormatUint(number, 10)
 		if index > 0 && number != 0 {
 			allTrailingZero = false
 		}
@@ -1285,10 +1592,10 @@ func parseSWHID(input string, options types.ParseOptions) (*types.IDInfo, error)
 func parseISBN(input string, options types.ParseOptions) (*types.IDInfo, error) {
 	clean := strings.ReplaceAll(input, "-", "")
 	if len(clean) == 13 && isDigits(clean) && (strings.HasPrefix(clean, "978") || strings.HasPrefix(clean, "979")) && isbn13Valid(clean) {
-		return isbnInfo(clean, "ISBN-13"), nil
+		return isbnInfo(clean, "ISBN-13")
 	}
 	if len(clean) == 10 && isbn10Valid(clean) {
-		return isbnInfo(clean, "ISBN-10"), nil
+		return isbnInfo(strings.ToUpper(clean), "ISBN-10")
 	}
 	return nil, errors.New("invalid ISBN")
 }
@@ -1334,28 +1641,77 @@ func isbn10Valid(value string) bool {
 	return sum%11 == 0
 }
 
-func isbnInfo(clean, kind string) *types.IDInfo {
-	standard := clean
+func isbnInfo(clean, kind string) (*types.IDInfo, error) {
+	group, publisherLength, groupName, ok := isbnGroupAndPublisherLength(clean, kind)
+	if !ok {
+		return nil, errors.New("ISBN is outside the supported range")
+	}
+	contentEnd := len(clean) - 1
+	groupEnd := 1
 	if kind == "ISBN-13" {
-		standard = clean[:3] + "-" + clean[3:4] + "-" + clean[4:7] + "-" + clean[7:12] + "-" + clean[12:]
-	} else {
-		standard = clean[:1] + "-" + clean[1:5] + "-" + clean[5:9] + "-" + clean[9:]
+		groupEnd = 3 + len(group)
+	}
+	publisherEnd := groupEnd + publisherLength
+	standard := clean[:groupEnd] + "-" + clean[groupEnd:publisherEnd] + "-" + clean[publisherEnd:contentEnd] + "-" + clean[contentEnd:]
+	if kind == "ISBN-13" {
+		standard = clean[:3] + "-" + clean[3:groupEnd] + "-" + clean[groupEnd:publisherEnd] + "-" + clean[publisherEnd:contentEnd] + "-" + clean[contentEnd:]
 	}
 	info := asciiInfo(kind, "", standard, "as ASCII, no dashes", clean, 0)
 	value, _ := parseBigDecimal(clean, 64)
 	if value != nil {
 		setIntegerValue(info, value, 0)
 	}
-	if kind == "ISBN-13" {
-		info.Node1 = stringPtr(clean[3:4])
-		info.Node2 = stringPtr(fmt.Sprintf("%s (Publisher ID)", clean[4:7]))
-		info.Sequence = int64Ptr(parseInt64(clean[7:12]))
-	} else {
-		info.Node1 = stringPtr(clean[:1])
-		info.Node2 = stringPtr(fmt.Sprintf("%s (Publisher ID)", clean[1:5]))
-		info.Sequence = int64Ptr(parseInt64(clean[5:9]))
+	sequenceStart := publisherEnd
+	info.Node1 = stringPtr(groupName)
+	info.Node2 = stringPtr(fmt.Sprintf("%s (Publisher ID)", clean[groupEnd:publisherEnd]))
+	info.Sequence = int64Ptr(parseInt64(clean[sequenceStart:contentEnd]))
+	return info, nil
+}
+
+func isbnGroupAndPublisherLength(clean, kind string) (string, int, string, bool) {
+	isbn13 := clean
+	if kind == "ISBN-10" {
+		isbn13 = "978" + clean[:9] + "0"
 	}
-	return info
+	if len(isbn13) != 13 {
+		return "", 0, "", false
+	}
+	prefixValue, _ := strconv.ParseInt(isbn13[:3], 16, 0)
+	prefix := int(prefixValue)
+	eanLength, ok := isbnRangeLength('E', prefix, 0, isbnSegment(isbn13, 0))
+	if !ok {
+		return "", 0, "", false
+	}
+	group := isbn13[3 : 3+eanLength]
+	groupPrefix := isbnGroupPrefix(isbn13, eanLength)
+	segment := isbnSegment(isbn13, eanLength)
+	registrant, ok := isbnRangeLength('R', prefix, groupPrefix, segment)
+	if !ok {
+		return "", 0, "", false
+	}
+	for _, rule := range isbnRanges {
+		if rule.kind == 'R' && rule.prefix == prefix && rule.group == groupPrefix && rule.start <= segment && segment <= rule.end && rule.length == registrant {
+			return group, registrant, rule.name, true
+		}
+	}
+	return "", 0, "", false
+}
+
+func isbnSegment(value string, base int) int {
+	start := 3 + base
+	result := 0
+	for index := start; index < start+6 && index < len(value); index++ {
+		result = result*10 + int(value[index]-'0')
+	}
+	return result * 10
+}
+
+func isbnGroupPrefix(value string, length int) int {
+	result := 0
+	for _, char := range value[3 : 3+length] {
+		result = result*16 + int(char-'0')
+	}
+	return result
 }
 
 func parseIPv4(input string, options types.ParseOptions) (*types.IDInfo, error) {
@@ -1413,11 +1769,22 @@ func parseMAC(input string, options types.ParseOptions) (*types.IDInfo, error) {
 }
 
 func parseMACBytes(input string) ([]byte, error) {
-	clean := strings.NewReplacer(":", "", "-", "", ".", "").Replace(input)
-	if len(clean) != 12 {
-		return nil, errors.New("invalid MAC address")
+	if len(input) == 17 {
+		for index := 0; index < 5; index++ {
+			if input[index*3+2] != ':' && input[index*3+2] != '-' {
+				return nil, errors.New("invalid MAC address")
+			}
+		}
+		clean := make([]byte, 0, 12)
+		for index := 0; index < 6; index++ {
+			clean = append(clean, input[index*3], input[index*3+1])
+		}
+		return hex.DecodeString(string(clean))
 	}
-	return hex.DecodeString(clean)
+	if len(input) == 12 {
+		return hex.DecodeString(input)
+	}
+	return nil, errors.New("invalid MAC address")
 }
 
 func parseIMEI(input string, options types.ParseOptions) (*types.IDInfo, error) {
@@ -2105,7 +2472,7 @@ func parseMist(input string, options types.ParseOptions) (*types.IDInfo, error) 
 	if err != nil {
 		return nil, err
 	}
-	info := infoFromBytes("Mist", "", input, "as integer", bigEndianBytes(new(big.Int).SetUint64(value), 8), 64, -1)
+	info := infoFromBytes("Mist", "", strconv.FormatUint(value, 10), "as integer", bigEndianBytes(new(big.Int).SetUint64(value), 8), 64, -1)
 	setIntegerValue(info, new(big.Int).SetUint64(value), 8)
 	info.Sequence = int64Ptr(int64(bitsU64(value, 1, 47)))
 	info.Node1 = stringPtr(fmt.Sprintf("%d (Salt 1)", bitsU64(value, 48, 8)))
@@ -2150,6 +2517,9 @@ func parseYouTube(input string, options types.ParseOptions) (*types.IDInfo, erro
 		return nil, errors.New("invalid YouTube ID")
 	}
 	data, err := base64.RawURLEncoding.DecodeString(input)
+	if err == nil && base64.RawURLEncoding.EncodeToString(data) != input {
+		err = errors.New("non-canonical YouTube ID")
+	}
 	if err != nil || len(data) != 8 {
 		return nil, errors.New("invalid YouTube ID")
 	}
@@ -2369,7 +2739,7 @@ func parseH3(input string, options types.ParseOptions) (*types.IDInfo, error) {
 	if cell.IsPentagon() {
 		shape = "pentagon"
 	}
-	info := infoFromBytes("H3 Grid System", "H3 Cell (Mode 1)", h3.CellToString(cell), "from hex", bigEndianBytes(new(big.Int).SetUint64(value), 8), 64, 0)
+	info := infoFromBytes("H3 Grid System", "H3 Cell (Mode 1)", h3.CellToString(cell), "", bigEndianBytes(new(big.Int).SetUint64(value), 8), 64, 0)
 	setIntegerValue(info, new(big.Int).SetUint64(value), 8)
 	info.Node1 = stringPtr(fmt.Sprintf("Resolution: %d, base cell: %d (%s)", cell.Resolution(), cell.BaseCellNumber(), shape))
 	info.Node2 = stringPtr(fmt.Sprintf("Center (lon, lat): %.6f, %.6f", center.Lng, center.Lat))
@@ -2415,7 +2785,6 @@ func parseKSUIDAligned(input string, options types.ParseOptions) (*types.IDInfo,
 		return nil, errors.New("invalid KSUID length")
 	}
 	info := infoFromBytes("KSUID", version, encodeBase(new(big.Int).SetBytes(data), "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", 27), parsed, data, 160, 128)
-	setIntegerValue(info, new(big.Int).SetBytes(data), 20)
 	info.Timestamp, info.DateTime = timestampInfo(int64(binary.BigEndian.Uint32(data[:4]))*1000, epochMillis(options, 1400000000000))
 	return info, nil
 }
@@ -2429,7 +2798,7 @@ func parseXIDAligned(input string, options types.ParseOptions) (*types.IDInfo, e
 		return nil, errors.New("invalid Xid")
 	}
 	data := append([]byte(nil), value[:]...)
-	info := infoFromBytes("Xid", "", input, "from base32hex", data, 96, 56)
+	info := infoFromBytes("Xid", "", input, "from base32hex", data, 96, 0)
 	setIntegerValue(info, new(big.Int).SetBytes(data), 12)
 	info.Timestamp, info.DateTime = timestampInfo(int64(binary.BigEndian.Uint32(data[:4]))*1000, epochMillis(options, 0))
 	info.Node1 = stringPtr(fmt.Sprintf("%d (Machine ID)", new(big.Int).SetBytes(data[4:7])))
@@ -2453,7 +2822,6 @@ func parseOrderlyID(input string, options types.ParseOptions) (*types.IDInfo, er
 	}
 	data := bigEndianBytes(value, 20)
 	info := infoFromBytes("OrderlyID, type "+parts[0], "", input, "from Crockford's base32", data, 160, 60)
-	setIntegerValue(info, value, 20)
 	flags := data[6]
 	version := "unknown"
 	if flags>>6 == 0 {
@@ -2466,7 +2834,7 @@ func parseOrderlyID(input string, options types.ParseOptions) (*types.IDInfo, er
 	info.Version = fmt.Sprintf("Version %s, %s, %s", version, privacy, ternary(len(valueParts) == 2, "with checksum", "no checksum"))
 	info.Timestamp, info.DateTime = timestampInfo(int64(binary.BigEndian.Uint64(append([]byte{0, 0}, data[:6]...))), epochMillis(options, 1577836800000))
 	info.Node1 = stringPtr(fmt.Sprintf("%d (Tenant)", binary.BigEndian.Uint16(data[7:9])))
-	info.Node2 = stringPtr(fmt.Sprintf("%d (Shard)", uint16(data[10]&0x0f)<<8|uint16(data[11])))
+	info.Node2 = stringPtr(fmt.Sprintf("%d (Shard)", uint16(data[10]&0x0f)<<12|uint16(data[11])<<4|uint16(data[12]>>4)))
 	info.Sequence = int64Ptr(int64(uint16(data[9])<<4 | uint16(data[10])>>4))
 	return info, nil
 }

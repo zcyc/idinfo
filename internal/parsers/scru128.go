@@ -1,8 +1,10 @@
 package parsers
 
 import (
+	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"math/big"
 	"regexp"
 	"time"
 
@@ -11,6 +13,21 @@ import (
 )
 
 type SCRU128Parser struct{}
+
+func generateSCRU128() (string, error) {
+	timestamp := time.Now().UnixMilli()
+	if timestamp <= 0 || timestamp >= 1<<48 {
+		return "", fmt.Errorf("SCRU128 timestamp is out of range")
+	}
+	random := make([]byte, 10)
+	if _, err := rand.Read(random); err != nil {
+		return "", fmt.Errorf("failed to generate SCRU128 entropy: %w", err)
+	}
+	value := new(big.Int).SetUint64(uint64(timestamp))
+	value.Lsh(value, 80)
+	value.Or(value, new(big.Int).SetBytes(random))
+	return encodeBase(value, "0123456789abcdefghijklmnopqrstuvwxyz", 25), nil
+}
 
 var scru128Regex = regexp.MustCompile(`^[0-9A-Za-z_-]{26}$`)
 
@@ -83,19 +100,6 @@ func (p *SCRU128Parser) Parse(input string) (*types.IDInfo, error) {
 	return info, nil
 }
 
-var scru128Sequence int64 = 0
-
 func (p *SCRU128Parser) Generate() (string, error) {
-	// Generate a simple SCRU128-like identifier
-	// In a real implementation, you'd use the proper SCRU128 generator
-	now := time.Now().UnixMilli()
-
-	// Add incrementing sequence to avoid duplicates
-	scru128Sequence++
-	if scru128Sequence >= 1000000000 {
-		scru128Sequence = 0
-	}
-
-	// This is a placeholder - real SCRU128 has specific format
-	return fmt.Sprintf("%013x%09x", now, scru128Sequence), nil
+	return scru128.NewString(), nil
 }

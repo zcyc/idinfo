@@ -14,6 +14,7 @@ type NanoIDParser struct{}
 
 // NanoID default alphabet
 const nanoIDAlphabet = "_-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+const uuinfoNanoIDAlphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz"
 
 var nanoIDRegex = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
@@ -92,7 +93,7 @@ func (p *NanoIDParser) Parse(input string) (*types.IDInfo, error) {
 }
 
 func (p *NanoIDParser) Generate() (string, error) {
-	return gonanoid.New()
+	return gonanoid.Generate(uuinfoNanoIDAlphabet, 21)
 }
 
 // Helper functions

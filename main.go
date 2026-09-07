@@ -36,6 +36,7 @@ func main() {
 	flag.CommandLine.BoolVar(everything, "everything", *everything, "Show all possible format interpretations")
 	flag.CommandLine.StringVar(alphabet, "alphabet", *alphabet, "Custom alphabet for Sqids and Nano ID")
 	flag.CommandLine.BoolVar(relative, "relative", *relative, "Show relative time if available")
+	flag.CommandLine.StringVar(generate, "generate", *generate, "Generate ID of specified format")
 	flag.CommandLine.BoolVar(help, "h", *help, "Show help")
 	flag.CommandLine.BoolVar(version, "V", *version, "Show version")
 	flag.CommandLine.Parse(normalizeIDArgs(os.Args[1:]))
@@ -103,15 +104,15 @@ func main() {
 		results = parsers.ParseIDWithOptions(input, *forceFormat, options)
 	}
 
+	if compareMode {
+		output.ShowComparison(results)
+		return
+	}
 	if len(results) == 0 {
-		fmt.Fprintf(os.Stderr, "Error: Unable to parse ID '%s'\n", input)
 		if *forceFormat != "" {
-			fmt.Fprintf(os.Stderr, "The ID cannot be parsed as format '%s'.\n", *forceFormat)
-			fmt.Fprintf(os.Stderr, "Try without the -f flag for auto-detection.\n")
+			fmt.Println("Invalid ID for this format.")
 		} else {
-			fmt.Fprintf(os.Stderr, "The ID format is not recognized or supported.\n")
-			fmt.Fprintf(os.Stderr, "Supported formats: %s\n", strings.Join(parsers.NewRegistry().GetAvailableParsers(), ", "))
-			fmt.Fprintf(os.Stderr, "Try using -f to force a specific format.\n")
+			fmt.Println("Unknown ID type.")
 		}
 		os.Exit(1)
 	}
@@ -125,11 +126,6 @@ func main() {
 	// Handle different output modes
 	if *everything {
 		output.ShowEverything(results)
-		return
-	}
-
-	if compareMode {
-		output.ShowComparison(results)
 		return
 	}
 
@@ -150,7 +146,7 @@ func main() {
 		if !*relative {
 			setRelativeTime(&jsonResult)
 		}
-		jsonOutput, err := json.MarshalIndent(jsonResult, "", "  ")
+		jsonOutput, err := json.Marshal(jsonResult)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error generating JSON output: %v\n", err)
 			fmt.Fprintf(os.Stderr, "This is likely due to invalid data in the parsed result.\n")
@@ -332,7 +328,8 @@ USAGE:
     idinfo -g <FORMAT>
 
 OPTIONS:
-    -f <FORMAT>     Force parsing as specific format
+    -f, --force <FORMAT>
+                    Force parsing as specific format
                     Available formats: uuid, uuid-b64, uuid25, shortuuid, uuid-int,
                     ulid, julid, upid, sandflake, timeflake, flake, objectid,
                     ksuid, xid, scru128, scru64, tsid, nuid, typeid, pushid,
@@ -341,15 +338,19 @@ OPTIONS:
                     slack, spotify, swhid, iban, commerce, vin, bitcoin,
                     ethereum, ipfs, ipv4, ipv6, mac, imei, isbn, h3, mist, comb,
                     snowflake variants, unix units, hashes, base58, base32.
-    -o <OUTPUT>     Output format (card, short, json, binary) [default: card]
-    -e              Show all possible format interpretations
-    -g <FORMAT>     Generate new ID of specified format
+    -o, --output <OUTPUT>
+                    Output format (card, short, json, binary) [default: card]
+    -e, --everything
+                    Show all possible format interpretations
+    -g, --generate <FORMAT>
+                    Generate new ID of specified format
                     For UUID, you can specify version: uuid:v1, uuid:v3, uuid:v4, 
                     uuid:v5, uuid:v6, uuid:v7 (default is v4)
     --color         Enable colored output [default: true]
     -c, --compare   Compare timestamps from different format interpretations
-    -a <ALPHABET>   Custom alphabet for Sqids and Nano ID
-    -r              Show relative time if timestamp is available
+    -a, --alphabet <ALPHABET>
+                    Custom alphabet for Sqids and Nano ID
+    -r, --relative  Show relative time if timestamp is available
     --salt <SALT>   Custom salt for Hashids
     --epoch <SEC>   Override epoch (seconds since 1970-01-01 UTC)
     --version       Show version
