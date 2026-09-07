@@ -366,7 +366,7 @@ func hashIDUnhashChecked(input, alphabet []rune) (uint64, bool) {
 }
 
 func parseBigDecimal(value string, bits int) (*big.Int, error) {
-	value = strings.TrimSpace(value)
+	value = normalizeUnsignedDecimal(value)
 	if value == "" || strings.HasPrefix(value, "-") {
 		return nil, errors.New("not an unsigned integer")
 	}
@@ -375,6 +375,10 @@ func parseBigDecimal(value string, bits int) (*big.Int, error) {
 		return nil, errors.New("integer out of range")
 	}
 	return number, nil
+}
+
+func normalizeUnsignedDecimal(value string) string {
+	return strings.TrimPrefix(strings.TrimSpace(value), "+")
 }
 
 func epochMillis(options types.ParseOptions, defaultMillis int64) uint64 {
@@ -988,7 +992,7 @@ func parseTSIDAligned(input string, options types.ParseOptions) (*types.IDInfo, 
 		value = uint64(tsid.FromString(input).ToNumber())
 		fromBase32 = true
 	} else {
-		parsed, err := strconv.ParseUint(strings.TrimSpace(input), 10, 64)
+		parsed, err := strconv.ParseUint(normalizeUnsignedDecimal(input), 10, 64)
 		if err != nil {
 			return nil, errors.New("invalid TSID")
 		}
@@ -1108,7 +1112,7 @@ var snowflakeLayouts = map[string]snowflakeLayout{
 
 func parseSnowflakeAligned(input string, options types.ParseOptions, layoutName string) (*types.IDInfo, error) {
 	fromBase58 := false
-	value, err := strconv.ParseUint(strings.TrimSpace(input), 10, 64)
+	value, err := strconv.ParseUint(normalizeUnsignedDecimal(input), 10, 64)
 	if err != nil && layoutName == "sf-frostflake" {
 		decoded, decodeErr := decodeBase(input, base58Alphabet)
 		if decodeErr != nil || decoded.BitLen() > 64 {
@@ -1164,11 +1168,11 @@ func parseSnowflakeAligned(input string, options types.ParseOptions, layoutName 
 }
 
 func parseSnowflakeAuto(input string, options types.ParseOptions) (*types.IDInfo, error) {
-	standard := strings.TrimSpace(input)
-	value, err := strconv.ParseUint(standard, 10, 64)
+	value, err := strconv.ParseUint(normalizeUnsignedDecimal(input), 10, 64)
 	if err != nil {
 		return nil, err
 	}
+	standard := strconv.FormatUint(value, 10)
 	info := infoFromBytes("Snowflake", "Unknown (use -f to specify version)", standard, "as integer", bigEndianBytes(new(big.Int).SetUint64(value), 8), 64, 0)
 	setIntegerValue(info, new(big.Int).SetUint64(value), 8)
 	info.Standard = standard
@@ -1187,7 +1191,7 @@ const (
 )
 
 func parseUnixAligned(input string, options types.ParseOptions, mode unixMode, recentOnly bool) (*types.IDInfo, error) {
-	value, err := strconv.ParseUint(strings.TrimSpace(input), 10, 64)
+	value, err := strconv.ParseUint(normalizeUnsignedDecimal(input), 10, 64)
 	if err != nil {
 		return nil, err
 	}
@@ -2509,7 +2513,7 @@ func parseThreads(input string, options types.ParseOptions) (*types.IDInfo, erro
 		parsed = "from base64"
 	} else {
 		var err error
-		number, err = strconv.ParseUint(strings.TrimSpace(input), 10, 64)
+		number, err = strconv.ParseUint(normalizeUnsignedDecimal(input), 10, 64)
 		if err != nil {
 			return nil, err
 		}
@@ -2526,7 +2530,7 @@ func parseThreads(input string, options types.ParseOptions) (*types.IDInfo, erro
 
 func parseSnowID(input string, options types.ParseOptions) (*types.IDInfo, error) {
 	fromBase62 := false
-	value, err := strconv.ParseUint(strings.TrimSpace(input), 10, 64)
+	value, err := strconv.ParseUint(normalizeUnsignedDecimal(input), 10, 64)
 	if err != nil {
 		encoded, decodeErr := decodeBase(input, base62Alphabet)
 		if decodeErr != nil || encoded.BitLen() > 64 {
@@ -2545,7 +2549,7 @@ func parseSnowID(input string, options types.ParseOptions) (*types.IDInfo, error
 }
 
 func parseMist(input string, options types.ParseOptions) (*types.IDInfo, error) {
-	value, err := strconv.ParseUint(strings.TrimSpace(input), 10, 64)
+	value, err := strconv.ParseUint(normalizeUnsignedDecimal(input), 10, 64)
 	if err != nil {
 		return nil, err
 	}

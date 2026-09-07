@@ -345,6 +345,35 @@ func TestCanonicalTextMatchesUuinfo(t *testing.T) {
 	}
 }
 
+func TestCompareUsesTimeAwareParsers(t *testing.T) {
+	input := "550e8400-e29b-41d4-a716-446655440000"
+	if results := ParseTimesWithOptions(input, types.ParseOptions{}); len(results) == 0 {
+		t.Fatal("compare mode lost time-aware UUID interpretations")
+	}
+}
+
+func TestUnsignedDecimalVariants(t *testing.T) {
+	tests := []struct {
+		format string
+		input  string
+		want   string
+	}{
+		{"snowflake", "+00", "0"},
+		{"sf-twitter", "+1777150623882019211", "1777150623882019211"},
+		{"unix", "+1734971723", "+1734971723"},
+		{"tsid", "+653390205760314336", "0J4AEXRN106Z0"},
+		{"threads", "+3543204764587855491", "+3543204764587855491"},
+		{"snowid", "+237640531155357696", "HYOYoYloLw"},
+		{"mist", "+171671", "171671"},
+	}
+	for _, testCase := range tests {
+		results := ParseIDWithOptions(testCase.input, testCase.format, types.ParseOptions{})
+		if len(results) != 1 || results[0].Standard != testCase.want {
+			t.Fatalf("%s standard = %#v, want %q", testCase.format, results, testCase.want)
+		}
+	}
+}
+
 func TestShortUUIDDashIsNilUUID(t *testing.T) {
 	results := ParseIDWithOptions("-", "shortuuid", types.ParseOptions{})
 	if len(results) != 1 || results[0].IDType != "ShortUUID of Nil UUID (all zeros)" || results[0].Standard != "" {

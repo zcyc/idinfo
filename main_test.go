@@ -14,6 +14,7 @@ func TestReadStdin(t *testing.T) {
 	}{
 		{name: "empty", input: "", want: ""},
 		{name: "first line", input: " 550e8400-e29b-41d4-a716-446655440000 \nignored", want: " 550e8400-e29b-41d4-a716-446655440000 "},
+		{name: "long line", input: strings.Repeat("x", 70_000), want: strings.Repeat("x", 70_000)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			got, err := readStdin(strings.NewReader(test.input))

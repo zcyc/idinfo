@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -90,12 +91,10 @@ func main() {
 		}
 	})
 	var results []*types.IDInfo
-	if *everything || compareMode {
-		if *everything {
-			results = parsers.ParseAllWithOptions(input, options)
-		} else {
-			results = parsers.ParseTimesWithOptions(input, options)
-		}
+	if compareMode {
+		results = parsers.ParseTimesWithOptions(input, options)
+	} else if *everything {
+		results = parsers.ParseAllWithOptions(input, options)
 	} else {
 		results = parsers.ParseIDWithOptions(input, *forceFormat, options)
 	}
@@ -172,11 +171,11 @@ func setRelativeTime(info *types.IDInfo) {
 }
 
 func readStdin(reader io.Reader) (string, error) {
-	scanner := bufio.NewScanner(reader)
-	if scanner.Scan() {
-		return scanner.Text(), scanner.Err()
+	line, err := bufio.NewReader(reader).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", err
 	}
-	return "", scanner.Err()
+	return strings.TrimSuffix(line, "\n"), nil
 }
 
 func normalizeIDArgs(args []string) []string {
