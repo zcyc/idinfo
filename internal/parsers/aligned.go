@@ -1164,13 +1164,14 @@ func parseSnowflakeAligned(input string, options types.ParseOptions, layoutName 
 }
 
 func parseSnowflakeAuto(input string, options types.ParseOptions) (*types.IDInfo, error) {
-	value, err := strconv.ParseUint(strings.TrimSpace(input), 10, 64)
+	standard := strings.TrimSpace(input)
+	value, err := strconv.ParseUint(standard, 10, 64)
 	if err != nil {
 		return nil, err
 	}
-	info := infoFromBytes("Snowflake", "Unknown (use -f to specify version)", input, "as integer", bigEndianBytes(new(big.Int).SetUint64(value), 8), 64, 0)
+	info := infoFromBytes("Snowflake", "Unknown (use -f to specify version)", standard, "as integer", bigEndianBytes(new(big.Int).SetUint64(value), 8), 64, 0)
 	setIntegerValue(info, new(big.Int).SetUint64(value), 8)
-	info.Standard = input
+	info.Standard = standard
 	info.HighConfidence = false
 	return info, nil
 }
@@ -1465,8 +1466,14 @@ func parseBreezeID(input string, options types.ParseOptions) (*types.IDInfo, err
 	} else if strings.ToUpper(input) != input {
 		return nil, errors.New("invalid Breeze ID alphabet")
 	}
-	for _, char := range strings.ToUpper(input) {
-		if char != '-' && !strings.ContainsRune(upper, char) {
+	for index, char := range strings.ToUpper(input) {
+		if (index+1)%5 == 0 {
+			if char != '-' {
+				return nil, errors.New("invalid Breeze ID")
+			}
+			continue
+		}
+		if !strings.ContainsRune(upper, char) {
 			return nil, errors.New("invalid Breeze ID")
 		}
 	}
@@ -1810,7 +1817,7 @@ func parseIPv6(input string, options types.ParseOptions) (*types.IDInfo, error) 
 		return nil, errors.New("invalid IPv6 address")
 	}
 	data := addr.As16()
-	info := infoFromBytes("IPv6 Address", ternary(addr.IsLoopback(), "Loopback", ""), addr.String(), "from hex parts", data[:], 128, -1)
+	info := infoFromBytes("IPv6 Address", ternary(addr.IsLoopback(), "Loopback", ""), strings.ToLower(input), "from hex parts", data[:], 128, -1)
 	setIntegerValue(info, new(big.Int).SetBytes(data[:]), 16)
 	info.HighConfidence = true
 	return info, nil
@@ -2764,7 +2771,7 @@ func parseEthereum(input string, options types.ParseOptions) (*types.IDInfo, err
 			version = "EIP-55 (invalid checksum)"
 		}
 	}
-	info := infoFromBytes("Ethereum Address", version, input, "from hex", data, 160, 160)
+	info := infoFromBytes("Ethereum Address", version, "0x"+part, "from hex", data, 160, 160)
 	info.HighConfidence = valid
 	return info, nil
 }

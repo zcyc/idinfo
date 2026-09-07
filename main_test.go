@@ -2,8 +2,30 @@ package main
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
+
+func TestReadStdin(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "empty", input: "", want: ""},
+		{name: "first line", input: " 550e8400-e29b-41d4-a716-446655440000 \nignored", want: " 550e8400-e29b-41d4-a716-446655440000 "},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := readStdin(strings.NewReader(test.input))
+			if err != nil {
+				t.Fatalf("readStdin() error = %v", err)
+			}
+			if got != test.want {
+				t.Errorf("readStdin() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
 
 func TestNormalizeIDArgs(t *testing.T) {
 	args := []string{"-f", "pushid", "-OFrJ24CPTXLcIPPjvh3"}
@@ -29,15 +51,33 @@ func TestNormalizeIDArgs(t *testing.T) {
 	}
 
 	args = []string{"-fpuid", "aeby6ob5sso4zd"}
-	wantShortAttached := []string{"-f", "puid", "aeby6ob5sso4zd"}
-	if got := normalizeIDArgs(args); !reflect.DeepEqual(got, wantShortAttached) {
-		t.Fatalf("normalizeIDArgs() mishandled an attached short value: %#v", got)
+	wantUnsupportedShortValue := []string{"--", "-fpuid", "aeby6ob5sso4zd"}
+	if got := normalizeIDArgs(args); !reflect.DeepEqual(got, wantUnsupportedShortValue) {
+		t.Fatalf("normalizeIDArgs() accepted an unsupported attached short value: %#v", got)
 	}
 
 	args = []string{"-f=pushid", "-OFrJ24CPTXLcIPPjvh3"}
 	wantEquals := []string{"-f=pushid", "--", "-OFrJ24CPTXLcIPPjvh3"}
 	if got := normalizeIDArgs(args); !reflect.DeepEqual(got, wantEquals) {
 		t.Fatalf("normalizeIDArgs() mishandled an equals-form short value: %#v", got)
+	}
+
+	args = []string{"550e8400-e29b-41d4-a716-446655440000", "-o", "json"}
+	wantTrailing := []string{"-o", "json", "550e8400-e29b-41d4-a716-446655440000"}
+	if got := normalizeIDArgs(args); !reflect.DeepEqual(got, wantTrailing) {
+		t.Fatalf("normalizeIDArgs() did not move trailing options: %#v", got)
+	}
+
+	args = []string{"-er", "550e8400-e29b-41d4-a716-446655440000"}
+	wantCluster := []string{"-e", "-r", "550e8400-e29b-41d4-a716-446655440000"}
+	if got := normalizeIDArgs(args); !reflect.DeepEqual(got, wantCluster) {
+		t.Fatalf("normalizeIDArgs() mishandled a boolean cluster: %#v", got)
+	}
+
+	args = []string{"550e8400-e29b-41d4-a716-446655440000", "-ojson"}
+	wantAttachedCluster := []string{"-o", "json", "550e8400-e29b-41d4-a716-446655440000"}
+	if got := normalizeIDArgs(args); !reflect.DeepEqual(got, wantAttachedCluster) {
+		t.Fatalf("normalizeIDArgs() mishandled an attached value: %#v", got)
 	}
 }
 

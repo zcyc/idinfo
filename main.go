@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -64,16 +65,18 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Try '%s --help' for more information.\n", os.Args[0])
 		os.Exit(2)
 	}
+	if len(args) > 1 {
+		fmt.Fprintf(os.Stderr, "error: unexpected argument %q found\n", args[1])
+		os.Exit(2)
+	}
 
 	compareMode := *compare || *compareShort
 	input := args[0]
 	if args[0] == "-" && !compareMode {
 		// Read from stdin
-		scanner := bufio.NewScanner(os.Stdin)
-		if scanner.Scan() {
-			input = scanner.Text()
-		}
-		if err := scanner.Err(); err != nil {
+		var err error
+		input, err = readStdin(os.Stdin)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error reading from stdin: %v\n", err)
 			fmt.Fprintf(os.Stderr, "Please ensure valid input is provided via pipe.\n")
 			os.Exit(1)
@@ -168,6 +171,14 @@ func setRelativeTime(info *types.IDInfo) {
 	info.Relative = &value
 }
 
+func readStdin(reader io.Reader) (string, error) {
+	scanner := bufio.NewScanner(reader)
+	if scanner.Scan() {
+		return scanner.Text(), scanner.Err()
+	}
+	return "", scanner.Err()
+}
+
 func normalizeIDArgs(args []string) []string {
 	booleanFlags := map[string]bool{
 		"-e": true, "--everything": true, "-c": true, "--compare": true,
@@ -177,12 +188,12 @@ func normalizeIDArgs(args []string) []string {
 		"-f": true, "--force": true, "-o": true, "--output": true, "-g": true, "--generate": true,
 		"-a": true, "--alphabet": true, "--salt": true, "--epoch": true,
 	}
+	var flags, positional []string
+	seenPositional := false
+	changed := false
 	for index := 0; index < len(args); index++ {
 		arg := args[index]
-		if arg == "--" || !strings.HasPrefix(arg, "-") {
-			if !strings.HasPrefix(arg, "-") {
-				continue
-			}
+		if arg == "--" {
 			return args
 		}
 		name := arg
@@ -190,30 +201,72 @@ func normalizeIDArgs(args []string) []string {
 			name = name[:equal]
 		}
 		if valueFlags[name] {
-			if !strings.ContainsRune(arg, '=') {
+			flags = append(flags, arg)
+			if !strings.ContainsRune(arg, '=') && index+1 < len(args) {
+				flags = append(flags, args[index+1])
 				index++
+			}
+			if seenPositional {
+				changed = true
 			}
 			continue
 		}
-		if !strings.HasPrefix(arg, "--") && len(arg) > 2 && valueFlags[arg[:2]] {
-			result := make([]string, 0, len(args)+1)
-			result = append(result, args[:index]...)
-			result = append(result, arg[:2], arg[2:])
-			result = append(result, args[index+1:]...)
-			return result
-		}
-		if booleanFlags[name] {
+		if seenPositional && !strings.HasPrefix(arg, "--") && len(arg) > 2 && valueFlags[arg[:2]] {
+			flags = append(flags, arg[:2], arg[2:])
+			changed = true
 			continue
 		}
-		if !strings.HasPrefix(arg, "--") {
-			result := make([]string, 0, len(args)+1)
-			result = append(result, args[:index]...)
-			result = append(result, "--", arg)
-			result = append(result, args[index+1:]...)
-			return result
+		if !strings.HasPrefix(arg, "--") && len(arg) > 2 {
+			shortFlags := arg[1:]
+			cluster := make([]string, 0, len(shortFlags))
+			parsed := true
+			for shortIndex := 0; shortIndex < len(shortFlags); shortIndex++ {
+				shortName := "-" + shortFlags[shortIndex:shortIndex+1]
+				if valueFlags[shortName] {
+					parsed = false
+					break
+				}
+				if !booleanFlags[shortName] {
+					parsed = false
+					break
+				}
+				cluster = append(cluster, shortName)
+			}
+			if parsed {
+				flags = append(flags, cluster...)
+				changed = true
+				continue
+			}
+		}
+		if booleanFlags[name] {
+			flags = append(flags, arg)
+			if seenPositional {
+				changed = true
+			}
+			continue
+		}
+		if strings.HasPrefix(arg, "-") && seenPositional {
+			flags = append(flags, arg)
+			changed = true
+			continue
+		}
+		positional = append(positional, arg)
+		if !seenPositional {
+			seenPositional = true
+			if strings.HasPrefix(arg, "-") {
+				changed = true
+			}
 		}
 	}
-	return args
+	if !changed {
+		return args
+	}
+	result := make([]string, 0, len(args)+1)
+	result = append(result, flags...)
+	if len(positional) > 0 && strings.HasPrefix(positional[0], "-") {
+		result = append(result, "--")
+	}
+	return append(result, positional...)
 }
 
 func handleGeneration(format string) {

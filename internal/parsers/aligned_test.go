@@ -319,6 +319,32 @@ func TestWhitespaceMatchesUuinfo(t *testing.T) {
 	}
 }
 
+func TestBreezeIDGrouping(t *testing.T) {
+	if results := ParseIDWithOptions("999999999999999999999999999999999999999", "breezeid", types.ParseOptions{}); len(results) != 0 {
+		t.Fatalf("ungrouped Breeze ID was accepted: %#v", results)
+	}
+	if results := ParseIDWithOptions("9NU6-XQLZ-BDIH-6HKE", "breezeid", types.ParseOptions{}); len(results) != 1 {
+		t.Fatalf("valid grouped Breeze ID was rejected: %#v", results)
+	}
+}
+
+func TestCanonicalTextMatchesUuinfo(t *testing.T) {
+	tests := []struct {
+		format string
+		input  string
+		want   string
+	}{
+		{"ipv6", "0:0:0:0:0:0:0:1", "0:0:0:0:0:0:0:1"},
+		{"ethereum", "0XD8DA6BF26964AF9D7EED9E03E53415D37AA96045", "0xD8DA6BF26964AF9D7EED9E03E53415D37AA96045"},
+	}
+	for _, testCase := range tests {
+		results := ParseIDWithOptions(testCase.input, testCase.format, types.ParseOptions{})
+		if len(results) != 1 || results[0].Standard != testCase.want {
+			t.Fatalf("%s standard = %#v, want %q", testCase.format, results, testCase.want)
+		}
+	}
+}
+
 func TestShortUUIDDashIsNilUUID(t *testing.T) {
 	results := ParseIDWithOptions("-", "shortuuid", types.ParseOptions{})
 	if len(results) != 1 || results[0].IDType != "ShortUUID of Nil UUID (all zeros)" || results[0].Standard != "" {
