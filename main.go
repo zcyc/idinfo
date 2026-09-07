@@ -23,7 +23,6 @@ func main() {
 		compare      = flag.Bool("compare", false, "Compare timestamps from different formats")
 		compareShort = flag.Bool("c", false, "Compare timestamps from different formats")
 		generate     = flag.String("g", "", "Generate ID of specified format")
-		colorOutput  = flag.Bool("color", true, "Enable colored output")
 		alphabet     = flag.String("a", "", "Custom alphabet for Sqids and Nano ID")
 		relative     = flag.Bool("r", false, "Show relative time if available")
 		salt         = flag.String("salt", "", "Custom salt for Hashids")
@@ -134,11 +133,7 @@ func main() {
 
 	switch *outputFormat {
 	case "card":
-		if *colorOutput {
-			output.ShowCardColored(result)
-		} else {
-			output.ShowCard(result)
-		}
+		output.ShowCardColored(result)
 	case "short":
 		output.ShowShort(result)
 	case "json":
@@ -176,7 +171,7 @@ func setRelativeTime(info *types.IDInfo) {
 
 func normalizeIDArgs(args []string) []string {
 	booleanFlags := map[string]bool{
-		"-e": true, "--everything": true, "-c": true, "--compare": true, "--color": true,
+		"-e": true, "--everything": true, "-c": true, "--compare": true,
 		"-r": true, "--relative": true, "--version": true, "--help": true, "-h": true, "-V": true,
 	}
 	valueFlags := map[string]bool{
@@ -331,7 +326,7 @@ OPTIONS:
     -f, --force <FORMAT>
                     Force parsing as specific format
                     Available formats: uuid, uuid-b64, uuid25, shortuuid, uuid-int,
-                    ulid, julid, upid, sandflake, timeflake, flake, objectid,
+                    ulid, julid, upid, sandflake, timeflake, flake, mongodb,
                     ksuid, xid, scru128, scru64, tsid, nuid, typeid, pushid,
                     orderlyid, threads, snowid, nano64, sqid, hashid, youtube,
                     stripe, datadog, breezeid, puid, tid, duns, asin, gdocs,
@@ -346,7 +341,6 @@ OPTIONS:
                     Generate new ID of specified format
                     For UUID, you can specify version: uuid:v1, uuid:v3, uuid:v4, 
                     uuid:v5, uuid:v6, uuid:v7 (default is v4)
-    --color         Enable colored output [default: true]
     -c, --compare   Compare timestamps from different format interpretations
     -a, --alphabet <ALPHABET>
                     Custom alphabet for Sqids and Nano ID
@@ -372,7 +366,7 @@ EXAMPLES:
       idinfo -g uuid:v6      # Generate UUID v6 (reordered timestamp + MAC)
       idinfo -g uuid:v7      # Generate UUID v7 (sortable timestamp + random)
       idinfo -g ulid
-      idinfo -g objectid
+      idinfo -g mongodb
 
 SUPPORTED ID FORMATS:
     - UUID (v1-v8), ShortUUID, UUID Base64, UUID25, UUID integer

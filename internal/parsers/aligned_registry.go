@@ -9,9 +9,9 @@ import (
 )
 
 var alignedFormats = []string{
-	"uuid", "uuid-b64", "uuid25", "shortuuid", "uuid-int", "ulid", "julid", "sandflake", "upid", "objectid", "ksuid", "xid",
+	"uuid", "uuid-b64", "uuid25", "shortuuid", "uuid-int", "ulid", "julid", "sandflake", "upid", "mongodb", "ksuid", "xid",
 	"scru128", "scru64", "timeflake", "flake", "tsid", "nuid", "typeid", "pushid", "orderlyid", "threads", "snowid", "nano64",
-	"sqid", "hashid", "youtube", "stripe", "datadog", "snowflake", "unixtime", "hash", "ipfs", "breezeid", "puid", "shortpuid",
+	"sqid", "hashid", "youtube", "stripe", "datadog", "snowflake", "unix", "hash", "ipfs", "breezeid", "puid", "shortpuid",
 	"ipv4", "ipv6", "mac", "isbn10", "tid", "duns", "asin", "nanoid", "cuid1", "cuid2", "h3", "imei", "gdocs", "slack",
 	"spotify", "swhid", "iban", "bitcoin", "ethereum", "commerce", "vin", "mist", "comb",
 }
@@ -33,9 +33,6 @@ func parseNameWithOptions(name, input string, options types.ParseOptions) (*type
 	if name == "base58" || name == "base32" {
 		return parseExisting(name, input)
 	}
-	if name == "cuid" {
-		name = "cuid2"
-	}
 	if name == "snowflake" {
 		return parseSnowflakeAuto(input, options)
 	}
@@ -50,25 +47,6 @@ func parseNameWithOptions(name, input string, options types.ParseOptions) (*type
 		return parseShortPUID(input, options)
 	}
 	return parseAlignedByName(name, input, options)
-}
-
-func canonicalForce(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	aliases := map[string]string{
-		"guid": "uuid", "uuid-integer": "uuid-int", "integer": "uuid-int", "uuid-base64": "uuid-b64", "base64": "uuid-b64", "uuid-25": "uuid25",
-		"mongodb": "objectid", "bson": "objectid", "scru": "scru128", "cuid": "cuid2", "nano-id": "nanoid", "nano_id": "nanoid",
-		"sf": "snowflake", "twitter": "sf-twitter", "mastodon": "sf-mastodon", "discord": "sf-discord", "instagram": "sf-instagram", "linkedin": "sf-linkedin",
-		"sony": "sf-sony", "spaceflake": "sf-spaceflake", "frostflake": "sf-frostflake", "flakeid": "sf-flakeid", "simpleflake": "sf-simpleflake",
-		"unix": "unixtime", "timestamp": "unixtime", "unix-seconds": "unix-s", "unix-milliseconds": "unix-ms", "unix-microseconds": "unix-us", "unix-nanoseconds": "unix-ns",
-		"hash": "hash", "hex": "hash", "traceid": "datadog", "breeze-id": "breezeid", "thread-id": "threads", "google-docs": "gdocs", "mac-address": "mac",
-		"barcode": "commerce", "gtin": "commerce", "btc": "bitcoin", "eth": "ethereum", "cid": "ipfs", "orderly-id": "orderlyid",
-		"hashids": "hashid", "youtube-id": "youtube",
-		"hashhex": "hash", "sqids": "sqid",
-	}
-	if canonical, ok := aliases[value]; ok {
-		return canonical
-	}
-	return value
 }
 
 func tryAligned(options types.ParseOptions, input string, names ...string) (*types.IDInfo, bool) {
@@ -116,7 +94,7 @@ func autoDetectAligned(input string, options types.ParseOptions) (*types.IDInfo,
 		case 25:
 			names = []string{"cuid1", "scru128"}
 		case 24:
-			names = []string{"objectid", "puid", "uuid-b64"}
+			names = []string{"mongodb", "puid", "uuid-b64"}
 		case 22:
 			names = []string{"shortuuid", "timeflake", "uuid-b64", "nuid", "spotify"}
 		case 21:
@@ -155,7 +133,7 @@ func autoDetectAligned(input string, options types.ParseOptions) (*types.IDInfo,
 func ParseIDWithOptions(input, force string, options types.ParseOptions) []*types.IDInfo {
 	input = strings.TrimSpace(input)
 	if force != "" {
-		name := canonicalForce(force)
+		name := strings.ToLower(strings.TrimSpace(force))
 		if name == "puid" {
 			if info, err := parsePUIDAny(input, options); err == nil {
 				return []*types.IDInfo{info}

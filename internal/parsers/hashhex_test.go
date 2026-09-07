@@ -7,8 +7,8 @@ import (
 
 func TestHashHexParser_Name(t *testing.T) {
 	parser := &HashHexParser{}
-	if parser.Name() != "HashHex" {
-		t.Errorf("Expected name 'HashHex', got '%s'", parser.Name())
+	if parser.Name() != "hash" {
+		t.Errorf("Expected name 'hash', got '%s'", parser.Name())
 	}
 }
 

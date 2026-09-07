@@ -25,7 +25,7 @@ var commonHashLengths = map[int]string{
 }
 
 func (p *HashHexParser) Name() string {
-	return "HashHex"
+	return "hash"
 }
 
 func (p *HashHexParser) CanParse(input string) bool {

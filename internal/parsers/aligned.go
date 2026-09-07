@@ -2869,7 +2869,7 @@ func parseAlignedByName(name, input string, options types.ParseOptions) (*types.
 		return parseSCRU64Aligned(input, options)
 	case "tsid":
 		return parseTSIDAligned(input, options)
-	case "objectid":
+	case "mongodb":
 		return parseObjectIDAligned(input, options)
 	case "ksuid":
 		return parseKSUIDAligned(input, options)
@@ -2953,7 +2953,7 @@ func parseAlignedByName(name, input string, options types.ParseOptions) (*types.
 		return parseMist(input, options)
 	case "hash":
 		return parseHashAligned(input, options)
-	case "unixtime":
+	case "unix":
 		return parseUnixAligned(input, options, unixAuto, false)
 	case "unix-recent":
 		return parseUnixAligned(input, options, unixAuto, true)

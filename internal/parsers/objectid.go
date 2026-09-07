@@ -15,7 +15,7 @@ type ObjectIDParser struct{}
 var objectIdRegex = regexp.MustCompile(`^[0-9a-fA-F]{24}$`)
 
 func (p *ObjectIDParser) Name() string {
-	return "ObjectID"
+	return "mongodb"
 }
 
 func (p *ObjectIDParser) CanParse(input string) bool {

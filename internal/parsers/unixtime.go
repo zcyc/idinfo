@@ -14,7 +14,7 @@ type UnixTimeParser struct{}
 var unixTimeRegex = regexp.MustCompile(`^(0|\d{10,19})$`)
 
 func (p *UnixTimeParser) Name() string {
-	return "UnixTime"
+	return "unix"
 }
 
 func (p *UnixTimeParser) CanParse(input string) bool {

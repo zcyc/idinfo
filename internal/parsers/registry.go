@@ -139,7 +139,7 @@ func NewRegistry() *Registry {
 			&alignedParser{name: "hash", parse: func(input string, options types.ParseOptions) (*types.IDInfo, error) {
 				return parseHashAligned(input, options)
 			}},
-			&alignedParser{name: "unixtime", parse: func(input string, options types.ParseOptions) (*types.IDInfo, error) {
+			&alignedParser{name: "unix", parse: func(input string, options types.ParseOptions) (*types.IDInfo, error) {
 				return parseUnixAligned(input, options, unixAuto, false)
 			}},
 			&alignedParser{name: "unix-s", parse: func(input string, options types.ParseOptions) (*types.IDInfo, error) {
@@ -280,97 +280,8 @@ func GetAllParsers() []types.IDParser {
 	return globalRegistry.GetAllParsers()
 }
 
-// matchesForceFormat checks if a parser name matches the forced format
+// matchesForceFormat checks if a parser name matches the forced format.
+// Format names are deliberately exact; aliases belong to the old CLI surface.
 func matchesForceFormat(parserName, forceFormat string) bool {
-	parserName = strings.ToLower(parserName)
-	forceFormat = strings.ToLower(forceFormat)
-
-	// Handle aliases and variations
-	aliases := map[string][]string{
-		"uuid":           {"uuid", "guid"},
-		"uuid-int":       {"uuid-int", "uuid-integer", "integer"},
-		"uuid-b64":       {"uuid-b64", "uuid-base64", "base64"},
-		"uuid25":         {"uuid25", "uuid-25"},
-		"ulid":           {"ulid"},
-		"julid":          {"julid"},
-		"upid":           {"upid"},
-		"sandflake":      {"sandflake"},
-		"timeflake":      {"timeflake"},
-		"flake":          {"flake"},
-		"objectid":       {"objectid", "mongodb", "bson"},
-		"ksuid":          {"ksuid"},
-		"xid":            {"xid"},
-		"cuid":           {"cuid", "cuid1", "cuid2"},
-		"scru128":        {"scru128", "scru"},
-		"scru64":         {"scru64"},
-		"tsid":           {"tsid"},
-		"nuid":           {"nuid", "nats-uid", "nats-id"},
-		"nanoid":         {"nanoid", "nano-id", "nano_id"},
-		"snowflake":      {"snowflake", "sf"},
-		"sf-twitter":     {"sf-twitter", "twitter"},
-		"sf-mastodon":    {"sf-mastodon", "mastodon"},
-		"sf-discord":     {"sf-discord", "discord"},
-		"sf-instagram":   {"sf-instagram", "instagram"},
-		"sf-linkedin":    {"sf-linkedin", "linkedin"},
-		"sf-sony":        {"sf-sony", "sony"},
-		"sf-spaceflake":  {"sf-spaceflake", "spaceflake"},
-		"sf-frostflake":  {"sf-frostflake", "frostflake"},
-		"sf-flakeid":     {"sf-flakeid", "flakeid"},
-		"sf-simpleflake": {"sf-simpleflake", "simpleflake"},
-		"unixtime":       {"unixtime", "unix", "timestamp"},
-		"unix-s":         {"unix-s", "unix-seconds"},
-		"unix-ms":        {"unix-ms", "unix-milliseconds"},
-		"unix-us":        {"unix-us", "unix-microseconds"},
-		"unix-ns":        {"unix-ns", "unix-nanoseconds"},
-		"hashhex":        {"hashhex", "hash", "hex"},
-		"base58":         {"base58", "b58", "bitcoin"},
-		"pushid":         {"pushid", "push-id", "firebase"},
-		"base32":         {"base32", "b32"},
-
-		"shortuuid": {"shortuuid", "short-uuid", "suuid"},
-		"sqids":     {"sqids", "sqid"},
-		"typeid":    {"typeid", "type-id"},
-		"datadog":   {"datadog", "traceid"},
-		"spotify":   {"spotify"},
-		"hashid":    {"hashid", "hashids"},
-		"youtube":   {"youtube", "youtube-id"},
-		"stripe":    {"stripe"},
-		"breezeid":  {"breezeid", "breeze-id"},
-		"puid":      {"puid"},
-		"tid":       {"tid"},
-		"threads":   {"threads", "thread-id"},
-		"snowid":    {"snowid"},
-		"duns":      {"duns"},
-		"asin":      {"asin"},
-		"gdocs":     {"gdocs", "google-docs"},
-		"slack":     {"slack"},
-		"nano64":    {"nano64"},
-		"orderlyid": {"orderlyid", "orderly-id"},
-		"swhid":     {"swhid"},
-		"iban":      {"iban"},
-		"commerce":  {"commerce", "barcode", "gtin"},
-		"vin":       {"vin"},
-		"bitcoin":   {"bitcoin", "btc"},
-		"ethereum":  {"ethereum", "eth"},
-		"ipfs":      {"ipfs", "cid"},
-		"ipv4":      {"ipv4"},
-		"ipv6":      {"ipv6"},
-		"mac":       {"mac", "mac-address"},
-		"imei":      {"imei"},
-		"isbn":      {"isbn"},
-		"h3":        {"h3"},
-		"mist":      {"mist"},
-	}
-
-	for canonicalName, aliasList := range aliases {
-		if parserName == canonicalName {
-			for _, alias := range aliasList {
-				if alias == forceFormat {
-					return true
-				}
-			}
-		}
-	}
-
-	return parserName == forceFormat
+	return strings.EqualFold(parserName, forceFormat)
 }

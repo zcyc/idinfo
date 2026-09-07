@@ -7,8 +7,8 @@ import (
 
 func TestSqidsParser_Name(t *testing.T) {
 	parser := &SqidsParser{}
-	if parser.Name() != "Sqids" {
-		t.Errorf("Expected name 'Sqids', got '%s'", parser.Name())
+	if parser.Name() != "sqid" {
+		t.Errorf("Expected name 'sqid', got '%s'", parser.Name())
 	}
 }
 

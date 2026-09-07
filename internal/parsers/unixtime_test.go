@@ -9,8 +9,8 @@ import (
 
 func TestUnixTimeParser_Name(t *testing.T) {
 	parser := &UnixTimeParser{}
-	if parser.Name() != "UnixTime" {
-		t.Errorf("Expected name 'UnixTime', got '%s'", parser.Name())
+	if parser.Name() != "unix" {
+		t.Errorf("Expected name 'unix', got '%s'", parser.Name())
 	}
 }
 

@@ -238,6 +238,30 @@ func TestAlignedForceFormats(t *testing.T) {
 	}
 }
 
+func TestLegacyForceAliasesAreRejected(t *testing.T) {
+	cases := map[string]string{
+		"guid":        "550e8400-e29b-41d4-a716-446655440000",
+		"objectid":    "507f1f77bcf86cd799439011",
+		"bson":        "507f1f77bcf86cd799439011",
+		"cuid":        "byab6ewccgwheoshq1wk9hds",
+		"nano-id":     "XBCdxzsCR2FEFeSwhnjCo",
+		"twitter":     "1777150623882019211",
+		"unixtime":    "1734971723",
+		"hashhex":     "d41d8cd98f00b204e9800998ecf8427e",
+		"sqids":       "86Rf07",
+		"hashids":     "gocwRvLhDf8",
+		"traceid":     "6772800700000000d97a8af26532e259",
+		"google-docs": "1ZQWherERWu_ZXMGhW0Yw_VxnHFPc3hxLBQ2FjSEalFE",
+	}
+	for format, input := range cases {
+		t.Run(format, func(t *testing.T) {
+			if results := ParseIDWithOptions(input, format, types.ParseOptions{}); len(results) != 0 {
+				t.Fatalf("legacy alias %q still parsed: %#v", format, results)
+			}
+		})
+	}
+}
+
 func TestGenerationMatchesAlignedParsers(t *testing.T) {
 	for _, format := range []string{"scru128", "nanoid"} {
 		t.Run(format, func(t *testing.T) {

@@ -15,7 +15,7 @@ type CUIDParser struct{}
 var cuid2Regex = regexp.MustCompile(`^[a-z0-9]+$`)
 
 func (p *CUIDParser) Name() string {
-	return "CUID"
+	return "cuid2"
 }
 
 func (p *CUIDParser) CanParse(input string) bool {

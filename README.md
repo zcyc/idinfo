@@ -73,7 +73,7 @@ idinfo 01ARZ3NDEKTSV4RRFFQ69G5FAV
 
 ```bash
 # Parse a number as Twitter Snowflake
-idinfo -f snowflake 1777150623882019211
+idinfo -f sf-twitter 1777150623882019211
 
 # Parse as UUID even if it could be something else
 idinfo -f uuid 550e8400-e29b-41d4-a716-446655440000
@@ -192,7 +192,6 @@ ID Type: UUID (RFC-9562), version: 4 (random).
 - `-o <OUTPUT>`: Output format (card, short, json, binary)
 - `-e`: Show all possible format interpretations
 - `--compare`: Compare timestamps from different format interpretations
-- `--color`: Enable colored output (default: true)
 
 ### Generation Options
 - `-g <FORMAT>`: Generate new ID of specified format
@@ -201,15 +200,16 @@ ID Type: UUID (RFC-9562), version: 4 (random).
 - `--help`: Show help message
 
 ### Available Force Formats
-- `uuid`, `guid`
-- `ulid`
-- `objectid`, `mongodb`, `bson`
-- `ksuid`
-- `xid`
-- `nanoid`, `nano-id`
-- `snowflake`, `sf`, `sf-twitter`, `sf-discord`, `twitter`, `discord`
-- `unixtime`, `unix`, `timestamp`
-- `hashhex`, `hash`, `hex`
+- `uuid`, `shortuuid`, `uuid-int`, `uuid-b64`, `uuid25`
+- `ulid`, `sandflake`, `julid`, `upid`, `comb`, `timeflake`, `flake`
+- `scru128`, `scru64`, `mongodb`, `ksuid`, `xid`, `cuid1`, `cuid2`, `nanoid`
+- `tsid`, `sqid`, `hashid`, `youtube`, `stripe`, `datadog`, `nuid`, `typeid`
+- `breezeid`, `puid`, `pushid`, `tid`, `threads`, `duns`, `asin`, `snowid`
+- `gdocs`, `slack`, `spotify`, `nano64`, `orderlyid`, `swhid`, `iban`
+- `commerce`, `vin`, `bitcoin`, `ethereum`
+- `sf-twitter`, `sf-mastodon`, `sf-discord`, `sf-instagram`, `sf-linkedin`, `sf-sony`, `sf-spaceflake`, `sf-frostflake`, `sf-flakeid`, `sf-simpleflake`
+- `mist`, `unix`, `unix-s`, `unix-ms`, `unix-us`, `unix-ns`, `hash`, `ipfs`
+- `ipv4`, `ipv6`, `mac`, `imei`, `isbn`, `h3`
 
 ## Architecture
 

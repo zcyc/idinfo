@@ -12,7 +12,7 @@ import (
 type SqidsParser struct{}
 
 func (p *SqidsParser) Name() string {
-	return "Sqids"
+	return "sqid"
 }
 
 func (p *SqidsParser) CanParse(input string) bool {
