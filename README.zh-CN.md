@@ -19,10 +19,10 @@
 
 需要 Go 1.24 或更高版本。
 
-安装最新版本：
+从当前主分支安装：
 
 ```bash
-go install github.com/zcyc/idinfo@latest
+go install github.com/zcyc/idinfo@main
 ```
 
 从源码构建：

@@ -19,10 +19,10 @@ It supports automatic detection, forced parsing, time comparison, JSON and binar
 
 Go 1.24 or later is required.
 
-Install the latest version:
+Install the current version from the main branch:
 
 ```bash
-go install github.com/zcyc/idinfo@latest
+go install github.com/zcyc/idinfo@main
 ```
 
 Build from source:
